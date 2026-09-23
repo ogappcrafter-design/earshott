@@ -14,6 +14,8 @@ export interface AppSettings {
   onboarded: boolean;
   headphoneAck: boolean;
   sounds: boolean;
+  listenView: 'ring' | 'sources';
+  scopeSensitivity: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -28,6 +30,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   onboarded: false,
   headphoneAck: false,
   sounds: true,
+  listenView: 'sources',
+  scopeSensitivity: 0.7,
 };
 
 const KEY = 'earshot.settings.v1';
@@ -39,6 +43,8 @@ export function loadSettings(storage: Pick<Storage, 'getItem'> = localStorage): 
     const p = JSON.parse(raw) as Partial<AppSettings>;
     const engine = { ...DEFAULT_ENGINE_SETTINGS, ...(p.engine ?? {}) };
     engine.eq = normalizeGains(engine.eq);
+    engine.mutes = Array.isArray(engine.mutes) ? engine.mutes.slice(0, 3) : [];
+    engine.lock = engine.lock && typeof engine.lock === 'object' ? engine.lock : null;
     return { ...DEFAULT_SETTINGS, ...p, engine, hearingEq: p.hearingEq ? normalizeGains(p.hearingEq) : null };
   } catch {
     return structuredClone(DEFAULT_SETTINGS);

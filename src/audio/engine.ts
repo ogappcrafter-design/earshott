@@ -35,6 +35,15 @@ function workletCapture(ctx: AudioContext): CaptureHandle {
 
 export interface VoiceFocusTarget { lowHz: number; highHz: number; medianHz: number }
 
+/** A sound picked on the Sources scope. Voices get the voice-focus curve; bands get a band-pass lift. */
+export type LockTarget =
+  | { kind: 'voice'; label: string; lowHz: number; medianHz: number; highHz: number; hue: number }
+  | { kind: 'band'; label: string; lowHz: number; highHz: number; peakHz: number };
+
+/** A sound the user muted from the scope: a cut centered on it. */
+export interface MuteTarget { label: string; centerHz: number; q: number }
+export const MAX_MUTES = 3;
+
 export interface EngineSettings {
   volumeDb: number;          // 0..30 amplification
   noiseReduction: number;    // 0..1
@@ -42,13 +51,15 @@ export interface EngineSettings {
   focusTarget: VoiceFocusTarget | null;
   balance: number;           // -1 (left) .. 1 (right)
   eq: number[];
+  lock: LockTarget | null;
+  mutes: MuteTarget[];
   deviceNoiseSuppression: boolean;
   limiterDb: number;         // output ceiling, dBFS
 }
 
 export const DEFAULT_ENGINE_SETTINGS: EngineSettings = {
   volumeDb: 10, noiseReduction: 0.5, voiceFocus: 0, focusTarget: null, balance: 0,
-  eq: normalizeGains(EQ_PRESETS.find((p) => p.id === 'speech')?.gains), deviceNoiseSuppression: true, limiterDb: -6,
+  eq: normalizeGains(EQ_PRESETS.find((p) => p.id === 'speech')?.gains), lock: null, mutes: [], deviceNoiseSuppression: true, limiterDb: -6,
 };
 
 export type EngineError = 'permission-denied' | 'no-microphone' | 'unsupported' | 'unknown';
@@ -70,7 +81,7 @@ export class AudioEngine {
   private nodes: {
     source: AudioNode; rumble: BiquadFilterNode; focusLow: BiquadFilterNode;
     focusFund: BiquadFilterNode; focusPresence: BiquadFilterNode; focusAir: BiquadFilterNode;
-    eq: BiquadFilterNode[]; gate: GateHandle; amp: GainNode; limiter: DynamicsCompressorNode;
+    eq: BiquadFilterNode[]; mutes: BiquadFilterNode[]; raw: AnalyserNode; gate: GateHandle; amp: GainNode; limiter: DynamicsCompressorNode;
     pan: StereoPannerNode; monitor: GainNode; capture: CaptureHandle; analyser: AnalyserNode;
   } | null = null;
   private settings: EngineSettings = { ...DEFAULT_ENGINE_SETTINGS };
@@ -87,6 +98,8 @@ export class AudioEngine {
   get running() { return this.ctx !== null && this.ctx.state !== 'closed'; }
   get sampleRate() { return this.ctx?.sampleRate ?? 48000; }
   get analyser() { return this.nodes?.analyser ?? null; }
+  /** Unprocessed mic spectrum, so the Sources scope sees every sound, including ones being cut. */
+  get rawAnalyser() { return this.nodes?.raw ?? null; }
 
   async start(settings: EngineSettings, opts: { demo?: boolean } = {}): Promise<void> {
     this.settings = { ...settings };
@@ -144,6 +157,10 @@ export class AudioEngine {
       const t: BiquadFilterType = i === 0 ? 'lowshelf' : i === EQ_BANDS.length - 1 ? 'highshelf' : 'peaking';
       return biquad(t, f, BAND_Q);
     });
+    const mutes = Array.from({ length: MAX_MUTES }, () => { const m = biquad('peaking', 1000, 4); m.gain.value = 0; return m; });
+    const raw = ctx.createAnalyser();
+    raw.fftSize = 8192; raw.smoothingTimeConstant = 0.35; raw.minDecibels = -120; raw.maxDecibels = -10;
+    source.connect(raw);
     const gate = this.legacy ? scriptGate(ctx) : workletGate(ctx);
     const amp = ctx.createGain();
     const limiter = ctx.createDynamicsCompressor();
@@ -155,13 +172,13 @@ export class AudioEngine {
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0.75;
 
-    const chain: AudioNode[] = [source, rumble, focusLow, focusFund, focusPresence, focusAir, ...eq, gate.node, amp, limiter];
+    const chain: AudioNode[] = [source, rumble, focusLow, focusFund, focusPresence, focusAir, ...eq, ...mutes, gate.node, amp, limiter];
     for (let i = 0; i < chain.length - 1; i++) chain[i].connect(chain[i + 1]);
     limiter.connect(pan); pan.connect(monitor); monitor.connect(ctx.destination);
     limiter.connect(capture.node);
     limiter.connect(analyser);
     capture.onChunk((c) => this.chunks.push(c));
-    this.nodes = { source, rumble, focusLow, focusFund, focusPresence, focusAir, eq, gate, amp, limiter, pan, monitor, capture, analyser };
+    this.nodes = { source, rumble, focusLow, focusFund, focusPresence, focusAir, eq, mutes, raw, gate, amp, limiter, pan, monitor, capture, analyser };
   }
 
   update(settings: EngineSettings) {
@@ -186,15 +203,33 @@ export class AudioEngine {
     ramp(n.limiter.threshold, Math.max(-24, Math.min(0, s.limiterDb)));
     ramp(n.pan.pan, Math.max(-1, Math.min(1, s.balance)));
     n.gate.setAmount(Math.max(0, Math.min(1, s.noiseReduction)));
-    const f = s.focusTarget ? Math.max(0, Math.min(1, s.voiceFocus)) : 0;
-    const target = s.focusTarget ?? { lowHz: 100, medianHz: 180, highHz: 300 };
-    ramp(n.focusLow.frequency, Math.max(60, target.lowHz * 0.75));
-    ramp(n.focusLow.gain, -14 * f);
-    ramp(n.focusFund.frequency, target.medianHz);
-    ramp(n.focusFund.gain, 5 * f);
-    ramp(n.focusPresence.frequency, target.medianHz < 165 ? 2500 : 3100);
-    ramp(n.focusPresence.gain, 7 * f);
-    ramp(n.focusAir.gain, -10 * f);
+    const lock: LockTarget | null = s.lock
+      ?? (s.focusTarget ? { kind: 'voice', label: '', hue: 0, ...s.focusTarget } : null);
+    const f = lock ? Math.max(0, Math.min(1, s.voiceFocus)) : 0;
+    if (lock?.kind === 'band') {
+      const lo = Math.max(50, lock.lowHz), hi = Math.min(18000, Math.max(lock.highHz, lo * 1.2));
+      const center = Math.sqrt(lo * hi);
+      const q = Math.max(0.5, Math.min(8, center / (hi - lo)));
+      ramp(n.focusLow.frequency, lo); ramp(n.focusLow.gain, -18 * f);
+      ramp(n.focusFund.frequency, center); n.focusFund.Q.setTargetAtTime(q, t, 0.03); ramp(n.focusFund.gain, 8 * f);
+      ramp(n.focusPresence.gain, 0);
+      ramp(n.focusAir.frequency, hi); ramp(n.focusAir.gain, -18 * f);
+    } else {
+      const target = lock ?? { lowHz: 100, medianHz: 180, highHz: 300 };
+      ramp(n.focusLow.frequency, Math.max(60, target.lowHz * 0.75));
+      ramp(n.focusLow.gain, -14 * f);
+      ramp(n.focusFund.frequency, target.medianHz); n.focusFund.Q.setTargetAtTime(1.2, t, 0.03);
+      ramp(n.focusFund.gain, 5 * f);
+      ramp(n.focusPresence.frequency, target.medianHz < 165 ? 2500 : 3100);
+      ramp(n.focusPresence.gain, 7 * f);
+      ramp(n.focusAir.frequency, 6500);
+      ramp(n.focusAir.gain, -10 * f);
+    }
+    n.mutes.forEach((m, i) => {
+      const mu = s.mutes?.[i];
+      if (mu) { ramp(m.frequency, Math.max(40, Math.min(18000, mu.centerHz))); m.Q.setTargetAtTime(Math.max(0.7, Math.min(30, mu.q)), t, 0.03); ramp(m.gain, -24); }
+      else ramp(m.gain, 0);
+    });
   }
 
   setMonitoring(on: boolean) {
