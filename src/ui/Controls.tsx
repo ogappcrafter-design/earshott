@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { sfx } from './sfx';
 
-export function Slider({ label, value, min, max, step = 1, onChange, format, hint }: {
+export function Slider({ id, label, value, min, max, step = 1, onChange, format, hint }: { id?: string;
   label: string; value: number; min: number; max: number; step?: number;
   onChange: (v: number) => void; format?: (v: number) => string; hint?: string;
 }) {
   const pct = ((value - min) / (max - min)) * 100;
   return (
-    <label className="slider">
+    <label id={id} className="slider">
       <span className="slider__row"><span>{label}</span><span className="slider__val">{format ? format(value) : value}</span></span>
       <input type="range" min={min} max={max} step={step} value={value}
         style={{ ['--pct' as string]: `${pct}%` }}
