@@ -31,7 +31,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hearingEq: null,
   activeVoiceId: null,
   bitDepth: 24,
-  transcribeModel: 'onnx-community/whisper-tiny.en',
+  transcribeModel: 'onnx-community/whisper-base.en',
   language: null,
   autoTranscribe: true,
   onboarded: false,

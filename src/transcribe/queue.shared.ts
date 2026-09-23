@@ -1,6 +1,7 @@
 export const TRANSCRIBE_MODELS = [
   { id: 'onnx-community/whisper-tiny.en', name: 'Fast', note: 'English only, about 40 MB download' },
   { id: 'onnx-community/whisper-base.en', name: 'Balanced', note: 'English only, about 80 MB download' },
+  { id: 'onnx-community/whisper-small.en', name: 'Accurate', note: 'English only, best accuracy, about 250 MB download' },
   { id: 'onnx-community/whisper-base', name: 'Multilingual', note: '99 languages, about 80 MB download' },
 ] as const;
 
