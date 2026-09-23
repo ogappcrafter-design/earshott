@@ -53,6 +53,8 @@ export interface EngineSettings {
   balance: number;               // -1..1
   eq: number[];
   lock: LockTarget | null;
+  /** Second locked voice (optional). Only used when both locks are voices. */
+  lock2: LockTarget | null;
   mutes: MuteTarget[];
   deviceNoiseSuppression: boolean;
   limiterDb: number;
@@ -64,7 +66,7 @@ export const DEFAULT_ENGINE_SETTINGS: EngineSettings = {
   volumeDb: 10, noiseReduction: 0.5, spectralAmount: 0.5, voiceFocus: 0,
   focusTarget: null, balance: 0,
   eq: normalizeGains(EQ_PRESETS.find((p)=>p.id==='speech')?.gains),
-  lock: null, mutes: [], deviceNoiseSuppression: false, limiterDb: -6,
+  lock: null, lock2: null, mutes: [], deviceNoiseSuppression: false, limiterDb: -6,
   humFilter: 'off', audioZoom: 'off',
 };
 
@@ -94,6 +96,7 @@ export class AudioEngine {
     rumble: BiquadFilterNode;
     focusLow: BiquadFilterNode; focusFund: BiquadFilterNode;
     focusPresence: BiquadFilterNode; focusAir: BiquadFilterNode;
+    focus2Fund: BiquadFilterNode; focus2Presence: BiquadFilterNode;
     eq: BiquadFilterNode[]; mutes: BiquadFilterNode[];
     raw: AnalyserNode; gate: GateHandle; amp: GainNode;
     limiter: DynamicsCompressorNode; pan: StereoPannerNode;
@@ -179,6 +182,8 @@ export class AudioEngine {
     const focusFund = biquad('peaking',180,1.2);
     const focusPresence = biquad('peaking',2800,0.9);
     const focusAir = biquad('highshelf',6500);
+    const focus2Fund = biquad('peaking',220,1.2); focus2Fund.gain.value=0;
+    const focus2Presence = biquad('peaking',3100,0.9); focus2Presence.gain.value=0;
     // 10-band EQ
     const eq = EQ_BANDS.map((f,i)=>{
       const t:BiquadFilterType = i===0?'lowshelf':i===EQ_BANDS.length-1?'highshelf':'peaking';
@@ -217,7 +222,7 @@ export class AudioEngine {
     const firstNode = spectral ?? humLo;
     source.connect(firstNode);
     if (spectral){spectral.connect(humLo);}
-    const chain: AudioNode[] = [humLo,humHi,rumble,focusLow,focusFund,focusPresence,focusAir,...eq,...mutes,gate.node,amp,limiter];
+    const chain: AudioNode[] = [humLo,humHi,rumble,focusLow,focusFund,focusPresence,focusAir,focus2Fund,focus2Presence,...eq,...mutes,gate.node,amp,limiter];
     for(let i=0;i<chain.length-1;i++) chain[i].connect(chain[i+1]);
     limiter.connect(pan);
     pan.connect(monitor); monitor.connect(ctx.destination);
@@ -226,7 +231,7 @@ export class AudioEngine {
     if(ghost) limiter.connect(ghost);
     capture.onChunk((c)=>this.chunks.push(c));
 
-    this.nodes = {source,spectral,humLo,humHi,rumble,focusLow,focusFund,focusPresence,focusAir,eq,mutes,raw,gate,amp,limiter,pan,monitor,capture,analyser,ghost};
+    this.nodes = {source,spectral,humLo,humHi,rumble,focusLow,focusFund,focusPresence,focusAir,focus2Fund,focus2Presence,eq,mutes,raw,gate,amp,limiter,pan,monitor,capture,analyser,ghost};
   }
 
   update(settings: EngineSettings){
@@ -302,9 +307,17 @@ export class AudioEngine {
       ramp(n.focusFund.gain,(8+z.midBoost)*f);
       ramp(n.focusPresence.gain,0);
       ramp(n.focusAir.frequency,hi); ramp(n.focusAir.gain,(-18-z.airCut)*f);
+      ramp(n.focus2Fund.gain,0); ramp(n.focus2Presence.gain,0);
     } else {
       const target = lock ?? {lowHz:100,medianHz:180,highHz:300};
-      ramp(n.focusLow.frequency,Math.max(60,target.lowHz*0.75+z.extraF));
+      const two = s.lock2?.kind==='voice' ? s.lock2 : null;
+      // Two voices: open the low cut wide enough for the deeper one, boost each voice's own pitch zone
+      const lowest = two ? Math.min(target.lowHz, two.lowHz) : target.lowHz;
+      if(two){
+        ramp(n.focus2Fund.frequency,two.medianHz); ramp(n.focus2Fund.gain,(5+z.midBoost)*f);
+        ramp(n.focus2Presence.frequency,two.medianHz<165?2500:3100); ramp(n.focus2Presence.gain,(4+z.midBoost*0.4)*f);
+      } else { ramp(n.focus2Fund.gain,0); ramp(n.focus2Presence.gain,0); }
+      ramp(n.focusLow.frequency,Math.max(60,lowest*0.75+z.extraF));
       ramp(n.focusLow.gain,(-14-z.lowCut)*f);
       ramp(n.focusFund.frequency,target.medianHz); n.focusFund.Q.setTargetAtTime(1.2,t,0.03);
       ramp(n.focusFund.gain,(5+z.midBoost)*f);

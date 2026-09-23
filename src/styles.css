@@ -365,3 +365,25 @@ details p { color: var(--mauve); margin-top: 8px; }
 
 /* ── Ghost buffer strip in rec-bar (for future direct integration) */
 .rec-bar .ghost-strip { font-size:.75rem; color:var(--phosphor); opacity:.7; margin-left:auto; }
+
+/* Voices heard: stable roster under the sound map */
+.heard{margin:10px 0 4px;display:flex;flex-direction:column;gap:6px}
+.heard__title{font:700 12px/1 'Bricolage Grotesque',sans-serif;letter-spacing:.12em;text-transform:uppercase;color:var(--brass)}
+.heard__list{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none}
+.heard__chip{flex:none;display:flex;align-items:center;gap:6px;min-height:44px;padding:0 14px;border-radius:22px;
+  border:1px solid hsl(var(--hue) 60% 60% / .35);background:hsl(var(--hue) 40% 20% / .35);color:var(--bone);
+  font:600 14px 'Figtree',sans-serif;opacity:.6;transition:opacity .2s,transform .15s,box-shadow .2s}
+.heard__chip small{opacity:.6;font-weight:400}
+.heard__chip i{width:8px;height:8px;border-radius:50%;background:hsl(var(--hue) 85% 68%)}
+.heard__chip.is-on{opacity:1}
+.heard__chip.is-on i{box-shadow:0 0 8px hsl(var(--hue) 85% 68%);animation:heardPulse 1.2s ease-in-out infinite}
+.heard__chip.is-picked{box-shadow:0 0 0 2px hsl(var(--hue) 85% 68%)}
+.heard__chip.is-locked{opacity:1;background:hsl(var(--hue) 60% 35% / .6);border-color:hsl(var(--hue) 85% 68%)}
+.heard__chip:active{transform:scale(.96)}
+@keyframes heardPulse{50%{transform:scale(1.5)}}
+@media (prefers-reduced-motion:reduce){.heard__chip.is-on i{animation:none}}
+.voice-card{margin:8px 0 10px;padding:10px 12px;border-radius:14px;background:hsl(var(--hue) 30% 16% / .6);border:1px solid hsl(var(--hue) 60% 60% / .25)}
+.voice-card dl{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;margin:0}
+.voice-card dt{font:700 10px/1 'Bricolage Grotesque',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:hsl(var(--hue) 70% 70%)}
+.voice-card dd{margin:3px 0 0;font:600 14px 'Figtree',sans-serif;color:var(--bone)}
+.voice-card small{display:block;margin-top:8px;opacity:.55;font-size:12px}

@@ -23,16 +23,19 @@ const LUT = (() => {
   return out;
 })();
 
-export function Scope({ analyser, active, sensitivity, lock, mutes, selectedId, onSelect, onSnapshot }: {
+export interface PinnedVoice { id: string; hz: number; hue: number; label: string; locked: boolean; present: boolean }
+
+export function Scope({ analyser, active, sensitivity, lock, mutes, selectedId, onSelect, onSnapshot, pinned = [], lock2 = null }: {
   analyser: AnalyserNode | null; active: boolean; sensitivity: number;
   lock: LockTarget | null; mutes: MuteTarget[]; selectedId: string | null;
+  pinned?: PinnedVoice[]; lock2?: LockTarget | null;
   onSelect: (s: Source | null) => void; onSnapshot: (s: ScopeSnapshot) => void;
 }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState<ScopeView>(FULL_VIEW);
   const viewRef = useRef(view); viewRef.current = view;
-  const live = useRef({ sensitivity, lock, mutes, selectedId, onSelect, onSnapshot });
-  live.current = { sensitivity, lock, mutes, selectedId, onSelect, onSnapshot };
+  const live = useRef({ sensitivity, lock, lock2, mutes, selectedId, onSelect, onSnapshot, pinned });
+  live.current = { sensitivity, lock, lock2, mutes, selectedId, onSelect, onSnapshot, pinned };
   const frameRef = useRef<ScopeSnapshot>({ voices: [], bands: [] });
 
   useEffect(() => {
@@ -117,9 +120,21 @@ export function Scope({ analyser, active, sensitivity, lock, mutes, selectedId, 
         g.setLineDash([]);
         labels.push({ y: (Math.max(0, y1) + Math.min(H, y2)) / 2, text: `${b.label}  ${fmtHz(b.lowHz)}–${fmtHz(b.highHz)}`, color: sel ? '#7EF2C8' : 'rgba(237,230,216,.85)' });
       }
+      // heard voices: permanent guide lines so they can be found even when quiet
+      for (const p of L.pinned) {
+        const y = yOf(p.hz); if (y < 0 || y > H) continue;
+        const col = `hsl(${p.hue} 85% 68%)`;
+        g.globalAlpha = p.locked ? 0.9 : p.present ? 0.6 : 0.3;
+        g.strokeStyle = col; g.lineWidth = dpr * (p.locked ? 2.5 : 1.2);
+        g.setLineDash(p.locked ? [] : [2 * dpr, 6 * dpr]);
+        g.beginPath(); g.moveTo(0, y); g.lineTo(W, y); g.stroke(); g.setLineDash([]);
+        g.globalAlpha = 1;
+        if (!voices.some((vo) => Math.abs(Math.log(vo.medianHz / p.hz)) < 0.12))
+          labels.push({ y, text: `${p.locked ? '● ' : ''}${p.label}${p.present ? '' : ' (quiet)'}`, color: col });
+      }
       // voice sources: glowing pitch tracks plus harmonic ticks
       for (const vo of voices) {
-        const sel = L.selectedId === vo.id || (L.lock?.kind === 'voice' && Math.abs(Math.log(L.lock.medianHz / vo.medianHz)) < 0.1);
+        const sel = L.selectedId === vo.id || (L.lock?.kind === 'voice' && Math.abs(Math.log(L.lock.medianHz / vo.medianHz)) < 0.1) || (L.lock2?.kind === 'voice' && Math.abs(Math.log(L.lock2.medianHz / vo.medianHz)) < 0.1);
         const color = `hsl(${vo.hue} 85% 68%)`;
         g.strokeStyle = color; g.lineWidth = dpr * (sel ? 3.5 : 2.2); g.shadowColor = color; g.shadowBlur = sel ? 14 * dpr : 6 * dpr;
         g.beginPath(); let pen = false;

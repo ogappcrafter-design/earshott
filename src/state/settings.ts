@@ -58,6 +58,7 @@ export function loadSettings(storage: Pick<Storage,'getItem'> = localStorage): A
     engine.eq = normalizeGains(engine.eq);
     engine.mutes = Array.isArray(engine.mutes) ? engine.mutes.slice(0,3) : [];
     engine.lock = (engine.lock && typeof engine.lock==='object') ? engine.lock : null;
+    engine.lock2 = (engine.lock2 && typeof engine.lock2==='object') ? engine.lock2 : null;
     if (!engine.humFilter) engine.humFilter = 'off';
     if (!engine.audioZoom) engine.audioZoom = 'off';
     if (engine.spectralAmount == null) engine.spectralAmount = 0.5;

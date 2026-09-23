@@ -1,3 +1,4 @@
+import { VoiceRoster, describeVoice, type HeardVoice } from '../audio/roster';
 import { useEffect, useState } from 'react';
 import { Scope, type ScopeSnapshot } from '../ui/Scope';
 import { fmtHz, type Source } from '../audio/sources';
@@ -22,7 +23,17 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
   const e = s.settings.engine;
   const view = s.settings.listenView;
   const [picked, setPicked] = useState<Source|null>(null);
-  const [, setSnap] = useState<ScopeSnapshot>({voices:[],bands:[]});
+  const roster = useRef(new VoiceRoster());
+  const lastSnap = useRef(0);
+  const [heard, setHeard] = useState<HeardVoice[]>([]);
+  const onSnap = (snap: ScopeSnapshot) => {
+    const now = performance.now()/1000; const dt = lastSnap.current ? Math.min(1, now-lastSnap.current) : 0.25; lastSnap.current = now;
+    setHeard(roster.current.update(snap.voices, now, dt).map((h)=>({...h})));
+  };
+  const sameVoice = (a:{medianHz:number}|null|undefined, hz:number) => !!a && Math.abs(Math.log(a.medianHz/hz))<0.1;
+  const isLocked = (hz:number) => (e.lock?.kind==='voice'&&sameVoice(e.lock,hz))||(e.lock2?.kind==='voice'&&sameVoice(e.lock2,hz));
+  const pickHeard = (h: HeardVoice) => { sfx.tap(); setNaming(null);
+    setPicked({kind:'voice',id:h.id,label:h.label,f0:h.medianHz,lowHz:h.lowHz,medianHz:h.medianHz,highHz:h.highHz,strength:1,hue:h.hue,history:[]}); };
   const [naming, setNaming] = useState<string|null>(null);
 
   const lockOn = (src: Source) => {
@@ -30,7 +41,12 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
     const lock = src.kind==='voice'
       ? {kind:'voice' as const,label:src.label,lowHz:src.lowHz,medianHz:src.medianHz,highHz:src.highHz,hue:src.hue}
       : {kind:'band' as const,label:src.label,lowHz:src.lowHz,highHz:src.highHz,peakHz:src.peakHz};
-    s.setEngine({lock,voiceFocus:Math.max(0.8,e.voiceFocus)});
+    // A second voice joins the first instead of replacing it (up to 2 voices at once)
+    if(lock.kind==='voice'&&e.lock?.kind==='voice'&&!sameVoice(e.lock,lock.medianHz)){
+      s.setEngine({lock2:lock,voiceFocus:Math.max(0.8,e.voiceFocus)});
+      toast(`Locked on ${e.lock.label} + ${src.label}`); setPicked(null); return;
+    }
+    s.setEngine({lock,lock2:lock.kind==='voice'?e.lock2:null,voiceFocus:Math.max(0.8,e.voiceFocus)});
     toast(`Locked on ${src.label}`); setPicked(null);
   };
   const mute = (src: Source) => {
@@ -42,6 +58,7 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
   };
   const saveVoiceFrom = async(src:Source,name:string)=>{
     if(src.kind!=='voice'||!name.trim()) return;
+    roster.current.rename(src.id,name.trim());
     await saveVoice({id:newId(),name:name.trim(),lowHz:src.lowHz,medianHz:src.medianHz,highHz:src.highHz,createdAt:Date.now(),colorHue:src.hue});
     await s.refresh(); setNaming(null); toast(`${name.trim()} saved to Voices`);
   };
@@ -99,8 +116,9 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
         <>
           <div className="scope-wrap">
             <Scope analyser={s.live?s.engine.rawAnalyser:null} active={s.live} sensitivity={s.settings.scopeSensitivity}
-              lock={e.lock} mutes={e.mutes} selectedId={picked?.id??null}
-              onSelect={(src)=>{sfx.tap();setPicked(src);setNaming(null);}} onSnapshot={setSnap} />
+              lock={e.lock} lock2={e.lock2} mutes={e.mutes} selectedId={picked?.id??null}
+              pinned={heard.map((h)=>({id:h.id,hz:h.medianHz,hue:h.hue,label:h.label,locked:isLocked(h.medianHz),present:h.present}))}
+              onSelect={(src)=>{sfx.tap();setPicked(src);setNaming(null);}} onSnapshot={onSnap} />
             {!s.live&&(
               <button type="button" className="scope-start" onClick={()=>{sfx.on();s.startLive();}}>
                 <IconHeadphones size={28} /><span>Start the mic to map sounds</span>
@@ -108,6 +126,17 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
             )}
           </div>
           <p className="fine scope-help">Tap a sound to select it. Pinch to zoom, drag to scroll, double-tap to see everything.</p>
+          <div className="heard">
+            <span className="heard__title">Voices heard</span>
+            {heard.length===0
+              ? <span className="fine">Anyone who talks steadily for 3 seconds shows up here.</span>
+              : <div className="heard__list">{heard.map((h)=>(
+                  <button key={h.id} type="button" style={{['--hue' as string]:h.hue}}
+                    className={`heard__chip${h.present?' is-on':''}${isLocked(h.medianHz)?' is-locked':''}${picked?.id===h.id?' is-picked':''}`}
+                    onClick={()=>pickHeard(h)} aria-label={`${h.label}, ${Math.round(h.medianHz)} hertz`}>
+                    <i />{h.label}<small>{Math.round(h.medianHz)} Hz</small>
+                  </button>))}</div>}
+          </div>
           {picked&&(
             <div className="pick-sheet" style={{['--hue' as string]:picked.kind==='voice'?picked.hue:45}}>
               <div className="pick-sheet__head">
@@ -117,6 +146,18 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
                   :`Steady sound from ${fmtHz(picked.lowHz)} to ${fmtHz(picked.highHz)} Hz`}</small>
                 <button type="button" className="icon-btn" aria-label="Close" onClick={()=>setPicked(null)}>×</button>
               </div>
+              {(()=>{ const h=heard.find((x)=>x.id===picked.id); if(!h) return null; const d=describeVoice(h,heard);
+                return (<div className="voice-card">
+                  <dl>
+                    <div><dt>Voice</dt><dd>{d.voice}</dd></div>
+                    <div><dt>Age</dt><dd>{d.age}</dd></div>
+                    <div><dt>Volume</dt><dd>{d.level}</dd></div>
+                    <div><dt>Distance</dt><dd>{d.distance}</dd></div>
+                    <div><dt>Tone</dt><dd>{d.style}</dd></div>
+                    <div><dt>Heard</dt><dd>{Math.round(h.heard)}s{h.present?' · talking now':' · quiet now'}</dd></div>
+                  </dl>
+                  <small>{d.note}</small>
+                </div>); })()}
               {naming!==null?(
                 <div className="pick-sheet__name">
                   <input autoFocus maxLength={24} value={naming} placeholder="Whose voice is this?" onChange={(ev)=>setNaming(ev.target.value)} />
@@ -134,8 +175,14 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
           <div className="lock-row">
             {e.lock&&(
               <button type="button" className="chip chip--lock" style={{['--hue' as string]:e.lock.kind==='voice'?e.lock.hue:160}}
-                onClick={()=>{sfx.off();s.setEngine({lock:null});}} aria-label={`Unlock ${e.lock.label}`}>
+                onClick={()=>{sfx.off();s.setEngine({lock:e.lock2,lock2:null});}} aria-label={`Unlock ${e.lock.label}`}>
                 Locked: {e.lock.label} ×
+              </button>
+            )}
+            {e.lock2&&(
+              <button type="button" className="chip chip--lock" style={{['--hue' as string]:e.lock2.kind==='voice'?e.lock2.hue:160}}
+                onClick={()=>{sfx.off();s.setEngine({lock2:null});}} aria-label={`Unlock ${e.lock2.label}`}>
+                Locked: {e.lock2.label} ×
               </button>
             )}
             {e.mutes.map((m,i)=>(
