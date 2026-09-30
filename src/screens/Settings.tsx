@@ -29,6 +29,21 @@ export function Settings({ onHearingCheck, onReplayIntro, onReplayTutorial, toas
       </section>
 
       <section className="panel">
+        <h3>Email backup</h3>
+        <Toggle label="Email every recording" checked={s.settings.emailBackup} onChange={(v) => set((x) => ({ ...x, emailBackup: v }))}
+          hint="Audio + transcript go to your inbox once transcribing is done." />
+        {s.settings.emailBackup && (<>
+          <label className="field">
+            <span>Backup key</span>
+            <input type="password" autoComplete="off" value={s.settings.backupKey} placeholder="Paste the key you set on Vercel"
+              onChange={(ev) => { const v = ev.target.value.trim(); set((x) => ({ ...x, backupKey: v })); }} />
+          </label>
+          <Toggle label="Delete from phone after sending" checked={s.settings.deleteAfterSend} onChange={(v) => set((x) => ({ ...x, deleteAfterSend: v }))}
+            hint="Only after every part is confirmed sent. Long recordings arrive as several emails." />
+        </>)}
+      </section>
+
+      <section className="panel">
         <h3>Transcription</h3>
         <Toggle label="Transcribe automatically" checked={s.settings.autoTranscribe} onChange={(v) => set((x) => ({ ...x, autoTranscribe: v }))}
           hint="Starts right after each recording saves." />

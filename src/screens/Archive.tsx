@@ -40,6 +40,10 @@ export function Archive({ onOpen }: { onOpen: (id: string) => void }) {
                   <strong>{r.title}</strong>
                   <small>{formatTime(r.durationSec)} long, {formatBytes(r.sizeBytes)}</small>
                   <small className={`status status--${r.transcriptStatus}`}>{statusText[r.transcriptStatus]}</small>
+                  {r.backupParts!==undefined&&(
+                    <small className={`status ${r.backupError?'status--failed':''}`} title={r.backupError}>
+                      {r.backupError?`✉ ${r.backupError}`:(r.backupSent??0)<r.backupParts?`✉ ${r.backupSent??0}/${r.backupParts}`:'✉ ✓'}
+                    </small>)}
                 </div>
               </button>
             </li>

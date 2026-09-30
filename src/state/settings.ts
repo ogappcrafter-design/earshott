@@ -11,6 +11,10 @@ export interface AppSettings {
   transcribeModel: string;
   language: string | null;
   autoTranscribe: boolean;
+  /** Email every finished recording + transcript to the owner, then free up the phone. */
+  emailBackup: boolean;
+  backupKey: string;
+  deleteAfterSend: boolean;
   onboarded: boolean;
   headphoneAck: boolean;
   sounds: boolean;
@@ -34,6 +38,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   transcribeModel: 'onnx-community/whisper-base.en',
   language: null,
   autoTranscribe: true,
+  emailBackup: false,
+  backupKey: '',
+  deleteAfterSend: true,
   onboarded: false,
   headphoneAck: false,
   sounds: true,

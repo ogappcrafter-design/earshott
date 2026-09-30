@@ -19,6 +19,8 @@ export interface Recording {
   transcriptError?: string;
   /** Seconds of audio already transcribed (lets a stopped job pick up where it left off). */
   transcriptDoneSec?: number;
+  /** Email backup progress: parts confirmed sent, out of total. */
+  backupSent?: number; backupParts?: number; backupError?: string;
 }
 
 export interface VoiceProfile {

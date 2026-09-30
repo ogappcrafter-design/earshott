@@ -3,6 +3,7 @@ import { AudioEngine, EngineStartError, type EngineSettings } from '../audio/eng
 import { encodeWav } from '../audio/wav';
 import { defaultTitle, listRecordings, listVoices, newId, saveRecording, spoolAppend, spoolClear, spoolPieces, spoolSessions, requestPersistentStorage, type Recording, type VoiceProfile } from '../storage/db';
 import { concatChunks, pcmBytes, wavHeader } from '../audio/wav';
+import { onBackupChange, queueBackup, resumeBackups } from '../storage/backup';
 import { enqueueTranscription, onTranscribe, resumePendingTranscriptions } from '../transcribe/queue';
 import { loadSettings, saveSettings, type AppSettings } from './settings';
 import { setSfxEnabled } from '../ui/sfx';
@@ -110,10 +111,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if(rescued) setError(`Recovered ${rescued} recording${rescued>1?'s':''} that were cut off. They're in your archive.`);
     })().catch(()=>setError('Your archive could not be opened. Restart the app to try again.'));
   },[refresh,finalizeSpool]);
+  const backupCfg = useMemo(()=>({emailBackup:settings.emailBackup,backupKey:settings.backupKey,deleteAfterSend:settings.deleteAfterSend}),
+    [settings.emailBackup,settings.backupKey,settings.deleteAfterSend]);
+  const backupRef = useRef(backupCfg); backupRef.current = backupCfg;
   useEffect(()=>onTranscribe((e)=>{
     if(e.type==='download') setDownloadProgress(e.progress>=100?null:e.progress);
     else{if(e.type!=='status') setDownloadProgress(null); refresh();}
+    // Transcript finished (or gave up): ship it
+    if(e.type==='done'||e.type==='error') queueBackup(e.id,backupRef.current);
   }),[refresh]);
+  useEffect(()=>onBackupChange(()=>{refresh().catch(()=>undefined);}),[refresh]);
+  useEffect(()=>{
+    resumeBackups(backupCfg).catch(()=>undefined);
+    const again=()=>{resumeBackups(backupRef.current).catch(()=>undefined);};
+    window.addEventListener('online',again);
+    return ()=>window.removeEventListener('online',again);
+  },[backupCfg]);
 
   const startLive = useCallback(async()=>{
     setError(null);
@@ -199,6 +212,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if(settings.activeVoiceId){rec.voiceProfileId=settings.activeVoiceId;await saveRecording(rec);}
     await refresh();
     if(settings.autoTranscribe) enqueueTranscription(rec.id,settings.transcribeModel,settings.language).then(refresh);
+    else queueBackup(rec.id,backupRef.current);
     return rec;
   },[engine,settings,refresh,flushSpool,finalizeSpool]);
 
@@ -221,6 +235,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     catch{setError('Storage full — could not save.');return null;}
     await refresh();
     if(settings.autoTranscribe) enqueueTranscription(rec.id,settings.transcribeModel,settings.language).then(refresh);
+    else queueBackup(rec.id,backupRef.current);
     return rec;
   },[engine,settings,refresh]);
 
