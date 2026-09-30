@@ -8,7 +8,7 @@ import { SUPPORT_EMAIL } from '../config';
 
 const LANGS: [string | null, string][] = [[null, 'Detect automatically'], ['english', 'English'], ['spanish', 'Spanish'], ['french', 'French'], ['german', 'German'], ['portuguese', 'Portuguese'], ['chinese', 'Chinese'], ['arabic', 'Arabic'], ['hindi', 'Hindi']];
 
-export function Settings({ onHearingCheck, onReplayIntro, onReplayTutorial, toast }: { onHearingCheck: () => void; onReplayIntro: () => void; onReplayTutorial?: () => void; toast: (t: string) => void }) {
+export function Settings({ onHearingCheck, onReplayTutorial, toast }: { onHearingCheck: () => void; onReplayTutorial?: () => void; toast: (t: string) => void }) {
   const s = useStore();
   const [reset, setReset] = useState(false);
   const set = s.setSettings;
@@ -69,7 +69,6 @@ export function Settings({ onHearingCheck, onReplayIntro, onReplayTutorial, toas
         <h3>App</h3>
         <Toggle label="Interface sounds" checked={s.settings.sounds} onChange={(v) => set((x) => ({ ...x, sounds: v }))} />
         <Button variant="ghost" onClick={onHearingCheck}>Redo tone check</Button>
-        <Button variant="ghost" onClick={onReplayIntro}>Replay the intro</Button>
         {onReplayTutorial && <Button variant="ghost" onClick={onReplayTutorial}>Replay the walkthrough</Button>}
       </section>
 

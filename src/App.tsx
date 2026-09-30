@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { App as CapApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { StoreProvider, useStore } from './state/store';
-import { Splash } from './screens/Splash';
 import { Onboarding } from './screens/Onboarding';
 import { HearingCheck } from './screens/HearingCheck';
 import { Listen } from './screens/Listen';
@@ -27,7 +26,7 @@ const TABS: {id:Tab;label:string;icon:JSX.Element}[] = [
 
 function Shell() {
   const s = useStore();
-  const [phase, setPhase] = useState<'splash'|'onboard'|'hearing'|'app'>('splash');
+  const [phase, setPhase] = useState<'onboard'|'hearing'|'app'>(()=>s.settings.onboarded?'app':'onboard');
   const [tab, setTab] = useState<Tab>('listen');
   const [openId, setOpenId] = useState<string|null>(null);
   const [showTutorial, setShowTutorial] = useState(false);
@@ -49,7 +48,6 @@ function Shell() {
     return()=>{sub.then((h)=>h.remove());};
   },[s.settings.onboarded]);
 
-  const afterSplash = useCallback(()=>setPhase(s.settings.onboarded?'app':'onboard'),[s.settings.onboarded]);
   const finishHearing = (eq:number[]|null)=>{
     s.setSettings((x)=>eq
       ?{...x,onboarded:true,hearingEq:eq,eqPresetId:'hearing',engine:{...x.engine,eq}}
@@ -75,8 +73,7 @@ function Shell() {
   };
 
   let body: JSX.Element;
-  if(phase==='splash') body=<Splash onDone={afterSplash} />;
-  else if(phase==='onboard') body=<Onboarding onFinish={(run)=>(run?setPhase('hearing'):finishHearing(null))} />;
+  if(phase==='onboard') body=<Onboarding onFinish={(run)=>(run?setPhase('hearing'):finishHearing(null))} />;
   else if(phase==='hearing') body=<HearingCheck onDone={finishHearing} onCancel={()=>finishHearing(null)} />;
   else{
     const goHearing=async()=>{if(s.live) await s.stopLive();setPhase('hearing');};
@@ -85,8 +82,7 @@ function Shell() {
       :tab==='tune'?<Tune onHearingCheck={goHearing} />
       :tab==='voices'?<Voices toast={push} />
       :tab==='archive'?<Archive onOpen={setOpenId} />
-      :<Settings onHearingCheck={goHearing} onReplayIntro={()=>setPhase('splash')}
-          onReplayTutorial={()=>setShowTutorial(true)} toast={push} />;
+      :<Settings onHearingCheck={goHearing}          onReplayTutorial={()=>setShowTutorial(true)} toast={push} />;
     body=(
       <>
         <main className="main" key={openId??tab}>{screen}</main>
