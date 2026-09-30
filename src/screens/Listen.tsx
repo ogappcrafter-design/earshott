@@ -216,8 +216,8 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
         <button type="button" className={`rec-btn${s.recording?' is-rec':''}`} onClick={record}
           aria-label={s.recording?'Stop recording':'Start recording'}><span /></button>
         <div className="rec-bar__info">
-          <strong>{s.recording?formatTime(elapsed):'Record'}</strong>
-          <small>{s.recording?`${s.bookmarks.length} bookmark${s.bookmarks.length===1?'':'s'}`:IS_TESTER?`${s.settings.bitDepth}-bit WAV`:`${s.settings.bitDepth}-bit WAV with transcript`}</small>
+          <strong>{s.recording?formatTime(elapsed):'●'}</strong>
+          <small>{s.recording?`◆ ${s.bookmarks.length}`:`${s.settings.bitDepth}-bit`}</small>
         </div>
         {s.recording&&(
           <button type="button" className="icon-btn" onClick={()=>{sfx.tap();s.addBookmark();}} aria-label="Bookmark this moment">

@@ -3,7 +3,7 @@ import { AudioEngine, EngineStartError, type EngineSettings } from '../audio/eng
 import { encodeWav } from '../audio/wav';
 import { defaultTitle, listRecordings, listVoices, newId, saveRecording, spoolAppend, spoolClear, spoolPieces, spoolSessions, requestPersistentStorage, type Recording, type VoiceProfile } from '../storage/db';
 import { concatChunks, pcmBytes, wavHeader } from '../audio/wav';
-import { enqueueTranscription, onTranscribe } from '../transcribe/queue';
+import { enqueueTranscription, onTranscribe, resumePendingTranscriptions } from '../transcribe/queue';
 import { loadSettings, saveSettings, type AppSettings } from './settings';
 import { setSfxEnabled } from '../ui/sfx';
 import { IS_TESTER } from '../demo';
@@ -106,6 +106,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         try{ if(await finalizeSpool(sess,`Recovered — ${defaultTitle()}`)) rescued++; }catch{/* keep the pieces for next launch */}
       }
       await refresh();
+      resumePendingTranscriptions(settings.transcribeModel,settings.language).catch(()=>undefined);
       if(rescued) setError(`Recovered ${rescued} recording${rescued>1?'s':''} that were cut off. They're in your archive.`);
     })().catch(()=>setError('Your archive could not be opened. Restart the app to try again.'));
   },[refresh,finalizeSpool]);

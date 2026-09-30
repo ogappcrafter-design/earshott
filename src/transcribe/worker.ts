@@ -12,7 +12,7 @@ if (onnx.wasm) {
   onnx.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1;
 }
 
-type Req = { id: string; audio: Float32Array; model: string; language: string | null };
+type Req = { id: string; audio: Float32Array; model: string; language: string | null; cpu?: boolean };
 type ASR = (audio: Float32Array, opts: Record<string, unknown>) => Promise<unknown>;
 
 let current: { model: string; asr: ASR } | null = null;
@@ -23,9 +23,9 @@ async function hasWebGPU(): Promise<boolean> {
   catch { return false; }
 }
 
-async function load(model: string) {
+async function load(model: string, cpu = false) {
   if (current?.model === model) return current.asr;
-  const gpu = await hasWebGPU();
+  const gpu = !cpu && (await hasWebGPU());
   const progress_callback = (p: { status: string; progress?: number; file?: string }) => {
     if (p.status === 'progress') self.postMessage({ type: 'download', progress: p.progress ?? 0, file: p.file });
   };
@@ -43,10 +43,10 @@ async function load(model: string) {
 }
 
 self.onmessage = async (e: MessageEvent<Req>) => {
-  const { id, audio, model, language } = e.data;
+  const { id, audio, model, language, cpu } = e.data;
   try {
     self.postMessage({ type: 'status', id, status: 'loading' });
-    const asr = await load(model);
+    const asr = await load(model, !!cpu);
     self.postMessage({ type: 'status', id, status: 'transcribing' });
     const isEnglishOnly = model.endsWith('.en');
     const prep = prepareForWhisper(audio);

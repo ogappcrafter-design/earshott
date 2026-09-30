@@ -7,7 +7,7 @@ export const TRANSCRIBE_MODELS = [
 
 export type TranscribeEvent =
   | { type: 'download'; progress: number }
-  | { type: 'status'; id: string; status: 'loading' | 'transcribing' }
+  | { type: 'status'; id: string; status: 'loading' | 'transcribing'; progress?: number }
   | { type: 'done'; id: string }
   | { type: 'error'; id: string; message: string };
 

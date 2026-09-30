@@ -17,6 +17,8 @@ export interface Recording {
   transcript: Transcript | null;
   transcriptStatus: 'none' | 'queued' | 'working' | 'done' | 'failed';
   transcriptError?: string;
+  /** Seconds of audio already transcribed (lets a stopped job pick up where it left off). */
+  transcriptDoneSec?: number;
 }
 
 export interface VoiceProfile {

@@ -40,7 +40,7 @@ export function Sieve({ analyser, active, focus, focusAmount }: {
         const len = W * 0.02 + v * W * 0.16;
         const x1 = c + Math.cos(ang) * R, y1 = c + Math.sin(ang) * R;
         const x2 = c + Math.cos(ang) * (R + len), y2 = c + Math.sin(ang) * (R + len);
-        g.strokeStyle = inFocus ? `rgba(126,242,200,${0.45 + v * 0.55})` : `rgba(217,164,65,${0.25 + v * 0.6})`;
+        g.strokeStyle = inFocus ? `rgba(143,167,184,${0.45 + v * 0.55})` : `rgba(94,140,143,${0.25 + v * 0.6})`;
         g.lineWidth = W * 0.012; g.lineCap = 'round';
         g.beginPath(); g.moveTo(x1, y1); g.lineTo(x2, y2); g.stroke();
         if (!reduced && active && !inFocus && v > 0.5 && Math.random() < 0.08 * focusAmount + 0.02) {
@@ -50,16 +50,16 @@ export function Sieve({ analyser, active, focus, focusAmount }: {
       for (let i = particles.length - 1; i >= 0; i--) {
         const p = particles[i]; p.r += p.v * dpr; p.life -= 0.02;
         if (p.life <= 0) { particles.splice(i, 1); continue; }
-        g.fillStyle = `rgba(217,164,65,${p.life * 0.7})`;
+        g.fillStyle = `rgba(94,140,143,${p.life * 0.7})`;
         g.beginPath(); g.arc(c + Math.cos(p.a) * p.r, c + Math.sin(p.a) * p.r + (1 - p.life) * W * 0.05, W * 0.005, 0, Math.PI * 2); g.fill();
       }
       const e = energy / BARS;
       const core = R * (0.62 + e * 0.35 + (reduced ? 0 : 0.02 * Math.sin(t / 30)));
       const grad = g.createRadialGradient(c, c, 0, c, c, core);
-      grad.addColorStop(0, active ? 'rgba(126,242,200,0.35)' : 'rgba(217,164,65,0.18)');
-      grad.addColorStop(1, 'rgba(23,17,31,0)');
+      grad.addColorStop(0, active ? 'rgba(143,167,184,0.35)' : 'rgba(94,140,143,0.18)');
+      grad.addColorStop(1, 'rgba(11,15,18,0)');
       g.fillStyle = grad; g.beginPath(); g.arc(c, c, core, 0, Math.PI * 2); g.fill();
-      g.strokeStyle = 'rgba(237,230,216,0.12)'; g.lineWidth = dpr;
+      g.strokeStyle = 'rgba(169,179,184,0.12)'; g.lineWidth = dpr;
       g.beginPath(); g.arc(c, c, R * 0.96, 0, Math.PI * 2); g.stroke();
       if (!reduced || active) raf = requestAnimationFrame(draw);
     };

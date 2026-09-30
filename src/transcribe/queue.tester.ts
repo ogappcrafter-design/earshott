@@ -9,3 +9,4 @@ export async function enqueueTranscription(id: string, _model: string, _language
     transcriptError: 'Transcripts run inside the installed Android app. This browser preview skips the speech model to stay small.',
   });
 }
+export async function resumePendingTranscriptions(_model: string, _language: string | null) { /* tester build: nothing to resume */ }
