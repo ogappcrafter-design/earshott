@@ -387,3 +387,7 @@ details p { color: var(--mauve); margin-top: 8px; }
 .voice-card dt{font:700 10px/1 'Bricolage Grotesque',sans-serif;letter-spacing:.1em;text-transform:uppercase;color:hsl(var(--hue) 70% 70%)}
 .voice-card dd{margin:3px 0 0;font:600 14px 'Figtree',sans-serif;color:var(--bone)}
 .voice-card small{display:block;margin-top:8px;opacity:.55;font-size:12px}
+.crash{position:fixed;inset:0;display:grid;place-items:center;background:var(--plum);padding:24px;z-index:999}
+.crash__card{max-width:340px;display:flex;flex-direction:column;gap:12px;padding:24px;border-radius:20px;background:rgba(237,230,216,.05);border:1px solid rgba(217,164,65,.3);text-align:center}
+.crash__card strong{font:800 22px 'Bricolage Grotesque',sans-serif;color:var(--brass)}
+.crash__card p{margin:0;color:var(--bone);opacity:.8}

@@ -70,6 +70,8 @@ export function Scope({ analyser, active, sensitivity, lock, mutes, selectedId, 
       const L = live.current;
       if (active && analyser && tracker) {
         tracker.sensitivity = L.sensitivity;
+        tracker.hints = [...L.pinned.map((p) => p.hz),
+          ...(L.lock?.kind === 'voice' ? [L.lock.medianHz] : []), ...(L.lock2?.kind === 'voice' ? [L.lock2.medianHz] : [])];
         analyser.getFloatFrequencyData(db);
         const f = tracker.update(db);
         frameRef.current = { voices: f.voices, bands: f.bands };

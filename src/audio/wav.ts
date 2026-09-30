@@ -41,3 +41,15 @@ export function concatChunks(chunks: Float32Array[]): Float32Array {
   for (const c of chunks) { out.set(c, o); o += c.length; }
   return out;
 }
+
+/** 44-byte WAV header for a mono file of `frames` samples. Lets us build a WAV Blob from pieces without holding it all in RAM. */
+export function wavHeader(frames: number, sampleRate: number, bitDepth: BitDepth): ArrayBuffer {
+  const buf = encodeWav([new Float32Array(0)], sampleRate, bitDepth);
+  const v = new DataView(buf); const size = frames * (bitDepth / 8);
+  v.setUint32(4, 36 + size, true); v.setUint32(40, size, true);
+  return buf;
+}
+/** Raw little-endian PCM bytes (no header) for one piece of a recording. */
+export function pcmBytes(samples: Float32Array, bitDepth: BitDepth): ArrayBuffer {
+  return encodeWav([samples], 48000, bitDepth).slice(44);
+}

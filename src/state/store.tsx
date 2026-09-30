@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AudioEngine, EngineStartError, type EngineSettings } from '../audio/engine';
 import { encodeWav } from '../audio/wav';
-import { defaultTitle, listRecordings, listVoices, newId, saveRecording, type Recording, type VoiceProfile } from '../storage/db';
+import { defaultTitle, listRecordings, listVoices, newId, saveRecording, spoolAppend, spoolClear, spoolPieces, spoolSessions, requestPersistentStorage, type Recording, type VoiceProfile } from '../storage/db';
+import { concatChunks, pcmBytes, wavHeader } from '../audio/wav';
 import { enqueueTranscription, onTranscribe } from '../transcribe/queue';
 import { loadSettings, saveSettings, type AppSettings } from './settings';
 import { setSfxEnabled } from '../ui/sfx';
@@ -80,7 +81,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const [r,v]=await Promise.all([listRecordings(),listVoices()]);
     setRecordings(r); setVoices(v);
   },[]);
-  useEffect(()=>{refresh().catch(()=>setError('Your archive could not be opened. Restart the app to try again.'));},[refresh]);
+  /** Turn saved spool pieces into a finished recording. Used on normal stop and after a crash. */
+  const finalizeSpool = useCallback(async(session:string,title?:string):Promise<Recording|null>=>{
+    const pieces=await spoolPieces(session);
+    if(!pieces.length) return null;
+    const {sampleRate,bitDepth,startedAt}=pieces[0];
+    const frames=pieces.reduce((n,p)=>n+p.frames,0);
+    const bookmarks=pieces[pieces.length-1].bookmarks;
+    if(frames<sampleRate*0.5){await spoolClear(session);return null;}
+    const audio=new Blob([wavHeader(frames,sampleRate,bitDepth),...pieces.map((p)=>p.pcm)],{type:'audio/wav'});
+    const rec:Recording={id:newId(),title:title??defaultTitle(new Date(startedAt)),createdAt:startedAt,durationSec:frames/sampleRate,
+      sampleRate,bitDepth,sizeBytes:audio.size,audio,bookmarks,voiceProfileId:null,transcript:null,transcriptStatus:'none'};
+    await saveRecording(rec);
+    await spoolClear(session);
+    return rec;
+  },[]);
+
+  useEffect(()=>{
+    (async()=>{
+      await requestPersistentStorage();
+      // Anything still in the spool means the app died mid-recording: rescue it
+      let rescued=0;
+      for(const sess of await spoolSessions()){
+        try{ if(await finalizeSpool(sess,`Recovered — ${defaultTitle()}`)) rescued++; }catch{/* keep the pieces for next launch */}
+      }
+      await refresh();
+      if(rescued) setError(`Recovered ${rescued} recording${rescued>1?'s':''} that were cut off. They're in your archive.`);
+    })().catch(()=>setError('Your archive could not be opened. Restart the app to try again.'));
+  },[refresh,finalizeSpool]);
   useEffect(()=>onTranscribe((e)=>{
     if(e.type==='download') setDownloadProgress(e.progress>=100?null:e.progress);
     else{if(e.type!=='status') setDownloadProgress(null); refresh();}
@@ -129,30 +157,49 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const startRecording = useCallback(async()=>{
     if(!engine.running&&!(await startLive())) return;
-    engine.startRecording();setRecording(true);setRecordStartedAt(Date.now());setBookmarks([]);
+    const session=newId(), startedAt=Date.now();
+    spool.current={session,seq:0,startedAt};
+    engine.startRecording();setRecording(true);setRecordStartedAt(startedAt);setBookmarks([]);
   },[engine,startLive]);
+
+  const spool = useRef<{session:string;seq:number;startedAt:number}|null>(null);
+  const bookmarksRef = useRef<number[]>([]);
+  useEffect(()=>{bookmarksRef.current=bookmarks;},[bookmarks]);
+  /** Move captured audio from RAM to disk. */
+  const flushSpool = useCallback(async(extra?:Float32Array)=>{
+    const sp=spool.current; if(!sp) return;
+    const parts=engine.drainChunks(); if(extra?.length) parts.push(extra);
+    if(!parts.length) return;
+    const samples=concatChunks(parts);
+    await spoolAppend({session:sp.session,seq:sp.seq++,startedAt:sp.startedAt,sampleRate:engine.sampleRate,
+      bitDepth:settings.bitDepth,frames:samples.length,pcm:new Blob([pcmBytes(samples,settings.bitDepth)]),bookmarks:bookmarksRef.current});
+  },[engine,settings.bitDepth]);
+  useEffect(()=>{
+    if(!recording) return;
+    const t=setInterval(()=>{flushSpool().catch(()=>setError('Storage is full. Stop recording to keep what you have.'));},3000);
+    return ()=>clearInterval(t);
+  },[recording,flushSpool]);
 
   const addBookmark = useCallback(()=>{
     if(recordStartedAt) setBookmarks((b)=>[...b,(Date.now()-recordStartedAt)/1000]);
   },[recordStartedAt]);
 
   const stopRecording = useCallback(async()=>{
-    const sr=engine.sampleRate;
-    const samples=await engine.stopRecording();
+    const tail=await engine.stopRecording();
     setRecording(false);setRecordStartedAt(null);
-    if(samples.length<sr*0.5){setError('That recording was under half a second, so it was not saved.');return null;}
-    const wav=encodeWav([samples],sr,settings.bitDepth);
-    const rec: Recording = {
-      id:newId(),title:defaultTitle(),createdAt:Date.now(),durationSec:samples.length/sr,sampleRate:sr,
-      bitDepth:settings.bitDepth,sizeBytes:wav.byteLength,audio:new Blob([wav],{type:'audio/wav'}),
-      bookmarks,voiceProfileId:settings.activeVoiceId,transcript:null,transcriptStatus:'none',
-    };
-    try{await saveRecording(rec);}
-    catch{setError('Your phone is out of storage space, so the recording could not be saved.');return null;}
+    const sp=spool.current;
+    let rec:Recording|null=null;
+    try{
+      await flushSpool(tail);
+      spool.current=null;
+      rec=sp?await finalizeSpool(sp.session):null;
+    }catch{setError('Your phone is out of storage space. What was recorded is kept and will be recovered next launch.');return null;}
+    if(!rec){setError('That recording was under half a second, so it was not saved.');return null;}
+    if(settings.activeVoiceId){rec.voiceProfileId=settings.activeVoiceId;await saveRecording(rec);}
     await refresh();
     if(settings.autoTranscribe) enqueueTranscription(rec.id,settings.transcribeModel,settings.language).then(refresh);
     return rec;
-  },[engine,settings,bookmarks,refresh]);
+  },[engine,settings,refresh,flushSpool,finalizeSpool]);
 
   /** Save the ghost buffer as a recording. */
   const saveGhostRecording = useCallback(async()=>{

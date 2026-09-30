@@ -36,6 +36,8 @@ export class SourceTracker {
   private nextId = 0;
   /** 0..1 — higher finds quieter sources. */
   sensitivity = 0.7;
+  /** Pitches of voices the user cares about (locked or heard). Quiet voices near these are kept instead of dropped. */
+  hints: number[] = [];
 
   constructor(private sampleRate: number, private fftSize: number) {}
 
@@ -102,9 +104,10 @@ export class SourceTracker {
           anti += this.at(work, f * (h + 0.5)) / Math.sqrt(h);
         }
         const score = found >= 4 && s > anti * 1.6 ? s - anti * 0.8 : 0;
-        if (score > bestS) { bestS = score; bestF = f; }
+        const need = this.hints.some((h) => Math.abs(Math.log(f / h)) < 0.12) ? threshold * 0.55 : threshold;
+        if (score > need && score > bestS) { bestS = score; bestF = f; }
       }
-      if (bestS <= threshold) break;
+      if (!bestF) break;
       picked.push({ f0: bestF, sal: bestS });
       for (let h = 1; h <= 40; h++) {
         const b = this.bin(bestF * h); if (b >= work.length) break;

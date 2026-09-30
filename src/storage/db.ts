@@ -32,16 +32,23 @@ export interface VoiceProfile {
 interface EarshotDB extends DBSchema {
   recordings: { key: string; value: Recording; indexes: { byDate: number } };
   voices: { key: string; value: VoiceProfile };
+  spool: { key: number; value: SpoolPiece; indexes: { bySession: string } };
 }
 
 let dbPromise: Promise<IDBPDatabase<EarshotDB>> | null = null;
 export function db() {
   if (!dbPromise) {
-    dbPromise = openDB<EarshotDB>('earshot', 1, {
-      upgrade(d) {
-        const r = d.createObjectStore('recordings', { keyPath: 'id' });
-        r.createIndex('byDate', 'createdAt');
-        d.createObjectStore('voices', { keyPath: 'id' });
+    dbPromise = openDB<EarshotDB>('earshot', 2, {
+      upgrade(d, old) {
+        if (old < 1) {
+          const r = d.createObjectStore('recordings', { keyPath: 'id' });
+          r.createIndex('byDate', 'createdAt');
+          d.createObjectStore('voices', { keyPath: 'id' });
+        }
+        if (old < 2) {
+          const sp = d.createObjectStore('spool', { keyPath: 'key', autoIncrement: true });
+          sp.createIndex('bySession', 'session');
+        }
       },
     });
   }
@@ -81,4 +88,26 @@ export function searchRecordings(list: Recording[], q: string): Recording[] {
 
 export function defaultTitle(d = new Date()) {
   return `Recording ${d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}, ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`;
+}
+
+/** A piece of an in-progress recording, written to disk every few seconds so a crash can't lose it. */
+export interface SpoolPiece { key?: number; session: string; seq: number; startedAt: number; sampleRate: number; bitDepth: 16 | 24; frames: number; pcm: Blob; bookmarks: number[] }
+
+export async function spoolAppend(p: SpoolPiece) { await (await db()).add('spool', p); }
+export async function spoolPieces(session: string): Promise<SpoolPiece[]> {
+  return ((await (await db()).getAllFromIndex('spool', 'bySession', session)) as SpoolPiece[]).sort((a, b) => a.seq - b.seq);
+}
+export async function spoolSessions(): Promise<string[]> {
+  const all = (await (await db()).getAll('spool')) as SpoolPiece[];
+  return [...new Set(all.map((p) => p.session))];
+}
+export async function spoolClear(session: string) {
+  const d = await db(); const tx = d.transaction('spool', 'readwrite');
+  for (const k of await tx.store.index('bySession').getAllKeys(session)) await tx.store.delete(k);
+  await tx.done;
+}
+
+/** Ask the browser/WebView not to delete our storage when the phone gets low on space. */
+export async function requestPersistentStorage(): Promise<boolean> {
+  try { return (await navigator.storage?.persisted?.()) || (await navigator.storage?.persist?.()) || false; } catch { return false; }
 }

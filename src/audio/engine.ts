@@ -97,6 +97,7 @@ export class AudioEngine {
     focusLow: BiquadFilterNode; focusFund: BiquadFilterNode;
     focusPresence: BiquadFilterNode; focusAir: BiquadFilterNode;
     focus2Fund: BiquadFilterNode; focus2Presence: BiquadFilterNode;
+    howl: BiquadFilterNode[]; leveler: DynamicsCompressorNode; hiss: BiquadFilterNode;
     eq: BiquadFilterNode[]; mutes: BiquadFilterNode[];
     raw: AnalyserNode; gate: GateHandle; amp: GainNode;
     limiter: DynamicsCompressorNode; pan: StereoPannerNode;
@@ -191,6 +192,13 @@ export class AudioEngine {
     });
     // Up to 3 mute notch filters
     const mutes = Array.from({length:MAX_MUTES},()=>{const m=biquad('peaking',1000,4);m.gain.value=0;return m;});
+    // Feedback killers: narrow notches placed automatically on any tone that starts to howl
+    const howl = Array.from({length:6},()=>{const h=biquad('peaking',1000,30);h.gain.value=0;return h;});
+    // Leveler: evens out loud vs soft so quiet voices aren't buried when someone near the phone talks
+    const leveler = ctx.createDynamicsCompressor();
+    leveler.threshold.value=-42; leveler.knee.value=18; leveler.ratio.value=3; leveler.attack.value=0.006; leveler.release.value=0.3;
+    // Hiss tamer: at extreme gain, trims the top end where mic self-noise lives
+    const hiss = biquad('highshelf',7000); hiss.gain.value=0;
     // Raw analyser (pre-processing) — for Sources scope
     const raw = ctx.createAnalyser();
     raw.fftSize=8192; raw.smoothingTimeConstant=0.35; raw.minDecibels=-120; raw.maxDecibels=-10;
@@ -222,7 +230,7 @@ export class AudioEngine {
     const firstNode = spectral ?? humLo;
     source.connect(firstNode);
     if (spectral){spectral.connect(humLo);}
-    const chain: AudioNode[] = [humLo,humHi,rumble,focusLow,focusFund,focusPresence,focusAir,focus2Fund,focus2Presence,...eq,...mutes,gate.node,amp,limiter];
+    const chain: AudioNode[] = [humLo,humHi,rumble,focusLow,focusFund,focusPresence,focusAir,focus2Fund,focus2Presence,...eq,...mutes,...howl,gate.node,leveler,hiss,amp,limiter];
     for(let i=0;i<chain.length-1;i++) chain[i].connect(chain[i+1]);
     limiter.connect(pan);
     pan.connect(monitor); monitor.connect(ctx.destination);
@@ -231,7 +239,7 @@ export class AudioEngine {
     if(ghost) limiter.connect(ghost);
     capture.onChunk((c)=>this.chunks.push(c));
 
-    this.nodes = {source,spectral,humLo,humHi,rumble,focusLow,focusFund,focusPresence,focusAir,focus2Fund,focus2Presence,eq,mutes,raw,gate,amp,limiter,pan,monitor,capture,analyser,ghost};
+    this.nodes = {source,spectral,humLo,humHi,rumble,focusLow,focusFund,focusPresence,focusAir,focus2Fund,focus2Presence,howl,leveler,hiss,eq,mutes,raw,gate,amp,limiter,pan,monitor,capture,analyser,ghost};
   }
 
   update(settings: EngineSettings){
@@ -256,6 +264,10 @@ export class AudioEngine {
 
     // — Amp — accept 0-80 dB now (spy-grade gain)
     ramp(n.amp.gain, dbToGain(Math.max(0,Math.min(80,s.volumeDb))));
+    // Past +40 dB mic self-noise turns into audible static: roll off the hiss band and tighten the leveler
+    const over = Math.max(0, s.volumeDb - 40);
+    ramp(n.hiss.gain, -Math.min(12, over * 0.35));
+    ramp(n.leveler.threshold, -42 - Math.min(10, over * 0.25));
 
     // — Limiter —
     ramp(n.limiter.threshold, Math.max(-24,Math.min(0,s.limiterDb)));
@@ -336,8 +348,57 @@ export class AudioEngine {
   }
 
   setMonitoring(on:boolean){
+    if(on&&this.nodes) this.startHowlGuard();
     this.monitoring=on;
     if(this.nodes&&this.ctx) this.nodes.monitor.gain.setTargetAtTime(on?1:0,this.ctx.currentTime,0.02);
+  }
+
+  /** Hands over audio captured so far and forgets it, so long recordings never pile up in memory. */
+  drainChunks(): Float32Array[]{ const c=this.chunks; this.chunks=[]; return c; }
+
+  /** How many feedback tones are currently being suppressed. */
+  feedbackNotches = 0;
+  private howlTimer: ReturnType<typeof setInterval> | null = null;
+  private howlSlots: {hz:number; at:number}[] = [];
+  private startHowlGuard(){
+    if(this.howlTimer) return;
+    const bins = new Float32Array(this.nodes!.analyser.frequencyBinCount);
+    const seen = new Map<number,number>();
+    this.howlTimer = setInterval(()=>{
+      const n=this.nodes, ctx=this.ctx; if(!n||!ctx) return;
+      // Only worth checking when sound is leaving the speaker loud enough to loop back
+      if(!this.monitoring || this.settings.volumeDb < 18){ seen.clear(); return; }
+      n.analyser.getFloatFrequencyData(bins);
+      const hzPer = ctx.sampleRate / n.analyser.fftSize;
+      const lo = Math.floor(150/hzPer), hi = Math.min(bins.length-9, Math.floor(9000/hzPer));
+      const hot = new Set<number>();
+      for(let b=lo;b<hi;b++){
+        const v=bins[b]; if(v < -38) continue;
+        let around=0; for(let k=4;k<=8;k++) around+=bins[b-k]+bins[b+k]; around/=10;
+        if(v-around>22 && v>=bins[b-1] && v>=bins[b+1]) hot.add(b);
+      }
+      for(const b of [...seen.keys()]) if(!hot.has(b)) seen.delete(b);
+      for(const b of hot){
+        const c=(seen.get(b)??0)+1; seen.set(b,c);
+        // A voice wobbles; feedback sits dead still. 4 hits ≈ 0.4 s of a frozen tone.
+        if(c===4) this.placeHowlNotch(b*hzPer);
+      }
+    },100);
+  }
+  private placeHowlNotch(hz:number){
+    const n=this.nodes, ctx=this.ctx; if(!n||!ctx) return;
+    if(this.howlSlots.some((s)=>Math.abs(Math.log(s.hz/hz))<0.03)) return;
+    let i=this.howlSlots.length;
+    if(i>=n.howl.length){ i=this.howlSlots.reduce((m,s,k,a)=>s.at<a[m].at?k:m,0); }
+    this.howlSlots[i]={hz,at:ctx.currentTime};
+    const f=n.howl[i]; f.frequency.setValueAtTime(hz,ctx.currentTime); f.Q.setValueAtTime(30,ctx.currentTime);
+    f.gain.setTargetAtTime(-30,ctx.currentTime,0.01);
+    this.feedbackNotches=this.howlSlots.length;
+  }
+  private clearHowl(){
+    if(this.howlTimer){clearInterval(this.howlTimer);this.howlTimer=null;}
+    this.howlSlots=[]; this.feedbackNotches=0;
+    this.nodes?.howl.forEach((h)=>{h.gain.value=0;});
   }
 
   startRecording(){
@@ -384,6 +445,7 @@ export class AudioEngine {
   }
 
   async stop(){
+    this.clearHowl();
     this.setMonitoring(false);
     this.recording=false;
     this.stream?.getTracks().forEach((t)=>t.stop());
