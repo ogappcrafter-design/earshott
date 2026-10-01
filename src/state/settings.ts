@@ -17,6 +17,8 @@ export interface AppSettings {
   deleteAfterSend: boolean;
   onboarded: boolean;
   headphoneAck: boolean;
+  /** Silent mode: never play sound out the speaker, so feedback is impossible. On by default. */
+  silentMode: boolean;
   sounds: boolean;
   listenView: 'ring' | 'sources';
   scopeSensitivity: number;
@@ -43,6 +45,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   deleteAfterSend: true,
   onboarded: false,
   headphoneAck: false,
+  silentMode: true,
   sounds: true,
   listenView: 'sources',
   scopeSensitivity: 0.7,

@@ -76,6 +76,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const setEngine = useCallback((patch:Partial<EngineSettings>)=>setSettings((s)=>({...s,engine:{...s.engine,...patch}})),[setSettings]);
 
   useEffect(()=>{if(engine.running) engine.update(effectiveEngine);},[effectiveEngine,engine]);
+  useEffect(()=>{engine.setSilent(settings.silentMode);},[settings.silentMode,engine,live]);
   useEffect(()=>{setSfxEnabled(settings.sounds);},[settings.sounds]);
 
   const refresh = useCallback(async()=>{

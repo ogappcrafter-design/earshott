@@ -393,3 +393,12 @@ details p { color: var(--mauve); margin-top: 8px; }
 .crash__card p{margin:0;color:var(--bone);opacity:.8}
 
 .rec-bar__info strong{font-weight:600;letter-spacing:.04em;color:var(--mauve)}
+
+/* Silent / Listen switch */
+.mode-switch{display:inline-flex;gap:2px;padding:3px;border-radius:999px;background:var(--plum-2);border:1px solid rgba(169,179,184,.12)}
+.mode-switch button{min-height:38px;padding:0 16px;border:0;border-radius:999px;background:transparent;color:var(--mauve);font:600 13px 'Figtree',sans-serif;letter-spacing:.02em;transition:all .2s}
+.mode-switch button.is-sel{background:rgba(94,140,143,.22);color:var(--bone)}
+.mode-switch--sm button{min-height:34px;padding:0 13px;font-size:12px}
+.pill-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center}
+.hear-btn.is-silent span,.hear-pill.is-silent span{opacity:.55}
+.hear-btn.is-silent,.hear-pill.is-silent{opacity:.75}

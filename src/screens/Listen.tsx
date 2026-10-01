@@ -70,9 +70,17 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
   },[s.recordStartedAt]);
 
   const monitor = () => {
+    if(s.settings.silentMode){ toast('Silent mode is on. Flip the switch to Listen to hear out loud.','ok'); return; }
     if(!s.monitoring&&!s.settings.headphoneAck){setAskHeadphones(true);return;}
     (s.monitoring?sfx.off:sfx.on)();
     s.toggleMonitor();
+  };
+  const setSilent = (on:boolean) => {
+    sfx.tap();
+    if(on){ if(s.monitoring) s.toggleMonitor(); s.setSettings((x)=>({...x,silentMode:true})); return; }
+    // leaving silent mode means sound will play out loud — confirm earbuds once
+    if(!s.settings.headphoneAck){ setAskHeadphones(true); return; }
+    s.setSettings((x)=>({...x,silentMode:false}));
   };
   const record = async() => {
     if(s.recording){const r=await s.stopRecording();if(r) toast(`Saved to your archive (${formatTime(r.durationSec)})`);}
@@ -106,12 +114,16 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
       {view==='ring' ? (
         <div className="listen__stage">
           <Sieve analyser={s.engine.analyser} active={s.live} focus={s.activeVoice} focusAmount={e.voiceFocus} />
-          <button id="tour-power" type="button" className={`hear-btn${s.monitoring?' is-on':''}`} onClick={monitor}
-            aria-pressed={s.monitoring} aria-label={s.monitoring?'Stop listening':'Start listening'}>
+          <button id="tour-power" type="button" className={`hear-btn${s.monitoring?' is-on':''}${s.settings.silentMode?' is-silent':''}`} onClick={monitor}
+            aria-pressed={s.monitoring} aria-label={s.settings.silentMode?'Silent mode — recording only':(s.monitoring?'Stop listening':'Start listening')}>
             <IconHeadphones size={36} />
-            <span>{s.monitoring?'Listening':'Tap to hear'}</span>
+            <span>{s.settings.silentMode?'Silent':s.monitoring?'Listening':'Tap to hear'}</span>
           </button>
-        </div>
+          <div className="mode-switch" role="group" aria-label="Playback mode">
+            <button type="button" className={s.settings.silentMode?'is-sel':''} onClick={()=>setSilent(true)} aria-pressed={s.settings.silentMode}>⌀ Silent</button>
+            <button type="button" className={!s.settings.silentMode?'is-sel':''} onClick={()=>setSilent(false)} aria-pressed={!s.settings.silentMode}>◖ Listen</button>
+          </div>
+          </div>
       ) : (
         <>
           <div className="scope-wrap">
@@ -190,9 +202,15 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
                 onClick={()=>s.setEngine({mutes:e.mutes.filter((_,k)=>k!==i)})}>Muted: {m.label} ×</button>
             ))}
           </div>
-          <button id="tour-power" type="button" className={`hear-pill${s.monitoring?' is-on':''}`} onClick={monitor} aria-pressed={s.monitoring}>
-            <IconHeadphones size={22} /><span>{s.monitoring?'Listening':'Tap to hear'}</span>
-          </button>
+          <div className="pill-row">
+            <div className="mode-switch mode-switch--sm" role="group" aria-label="Playback mode">
+            <button type="button" className={s.settings.silentMode?'is-sel':''} onClick={()=>setSilent(true)} aria-pressed={s.settings.silentMode}>⌀ Silent</button>
+            <button type="button" className={!s.settings.silentMode?'is-sel':''} onClick={()=>setSilent(false)} aria-pressed={!s.settings.silentMode}>◖ Listen</button>
+          </div>
+          <button id="tour-power" type="button" className={`hear-pill${s.monitoring?' is-on':''}${s.settings.silentMode?' is-silent':''}`} onClick={monitor} aria-pressed={s.monitoring}>
+              <IconHeadphones size={22} /><span>{s.settings.silentMode?'Silent':s.monitoring?'Listening':'Tap to hear'}</span>
+            </button>
+          </div>
         </>
       )}
 
@@ -286,10 +304,10 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
         }} recording={s.recording} recordStartedAt={s.recordStartedAt} />
       )}
 
-      <Confirm open={askHeadphones} title="Earbuds in?"
-        body="Live listening through the phone speaker causes loud feedback squeal. Use wired or USB-C earbuds for the least delay."
-        confirmLabel="They're in" onCancel={()=>setAskHeadphones(false)}
-        onConfirm={()=>{setAskHeadphones(false);s.setSettings((x)=>({...x,headphoneAck:true}));sfx.on();s.toggleMonitor();}} />
+      <Confirm open={askHeadphones} title="Listen out loud?"
+        body="Recording is always silent and safe. Hearing live out loud works best with earbuds — through the speaker it can squeal. Earbuds in?"
+        confirmLabel="Earbuds in, listen" onCancel={()=>setAskHeadphones(false)}
+        onConfirm={()=>{setAskHeadphones(false);s.setSettings((x)=>({...x,headphoneAck:true,silentMode:false}));}} />
     </div>
   );
 }

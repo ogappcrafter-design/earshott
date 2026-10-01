@@ -4,7 +4,7 @@ import { Button } from '../ui/Controls';
 import { IconArchive, IconHeadphones, IconVoice } from '../ui/Icons';
 
 const STEPS = [
-  { art: <IconHeadphones size={64} />, title: 'Hear it', body: 'Earshot turns your phone into a personal sound amplifier. Plug in wired or USB-C earbuds for real-time listening. Bluetooth adds a delay you will notice.' },
+  { art: <IconHeadphones size={64} />, title: 'Hear it', body: 'Earshot turns your phone into a sound amplifier and recorder. Recording is always silent and safe. To hear live out loud, add earbuds.' },
   { art: <IconVoice size={64} />, title: 'Lock on', body: 'Teach Earshot a voice with a 20-second sample. Focus mode then lifts that voice’s range and lets the rest fall away.' },
   { art: <IconArchive size={64} />, title: 'Keep it', body: 'Recordings save as studio-quality WAV files with a best-guess transcript you can search, share and download.' },
 ];

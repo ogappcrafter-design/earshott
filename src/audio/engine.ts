@@ -114,6 +114,8 @@ export class AudioEngine {
   demo = false;
   legacy = false;
   monitoring = false;
+  /** When true, speaker output is forced silent no matter what monitoring says. */
+  silent = true;
   recording = false;
 
   get running() { return this.ctx!==null && this.ctx.state!=='closed'; }
@@ -348,9 +350,19 @@ export class AudioEngine {
   }
 
   setMonitoring(on:boolean){
-    if(on&&this.nodes) this.startHowlGuard();
+    if(on&&!this.silent&&this.nodes) this.startHowlGuard();
     this.monitoring=on;
-    if(this.nodes&&this.ctx) this.nodes.monitor.gain.setTargetAtTime(on?1:0,this.ctx.currentTime,0.02);
+    this.applyMonitorGain();
+  }
+  setSilent(on:boolean){
+    this.silent=on;
+    if(on) this.clearHowl(); else if(this.monitoring&&this.nodes) this.startHowlGuard();
+    this.applyMonitorGain();
+  }
+  private applyMonitorGain(){
+    if(!this.nodes||!this.ctx) return;
+    const out = this.silent ? 0 : (this.monitoring ? 1 : 0);
+    this.nodes.monitor.gain.setTargetAtTime(out,this.ctx.currentTime,0.02);
   }
 
   /** Hands over audio captured so far and forgets it, so long recordings never pile up in memory. */
