@@ -53,9 +53,13 @@ class EarshotCapture extends AudioWorkletProcessor {
     };
   }
   flush(){ if(this.len>0){this.port.postMessage({type:'chunk',data:this.buf.slice(0,this.len)});this.len=0;} }
-  process(inputs){
-    const inp=inputs[0]; if(!this.recording||!inp||inp.length===0) return true;
+  process(inputs,outputs){
+    const inp=inputs[0]; const out=outputs&&outputs[0];
+    if(!inp||inp.length===0){ return true; }
     const n=inp[0].length;
+    // Always pass audio straight through, so this node stays part of the running graph.
+    if(out&&out[0]){ for(let c=0;c<out.length;c++){ const oc=out[c], ic=inp[Math.min(c,inp.length-1)]; for(let i=0;i<n;i++) oc[i]=ic[i]; } }
+    if(!this.recording) return true;
     for(let i=0;i<n;i++){
       let s=0; for(let c=0;c<inp.length;c++) s+=inp[c][i];
       this.buf[this.len++]=s/inp.length;

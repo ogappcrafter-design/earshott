@@ -17,7 +17,7 @@ function workletGate(ctx: AudioContext): GateHandle {
 }
 
 function workletCapture(ctx: AudioContext): CaptureHandle {
-  const n = new AudioWorkletNode(ctx, 'earshot-capture', { numberOfInputs:1, numberOfOutputs:0 });
+  const n = new AudioWorkletNode(ctx, 'earshot-capture', { numberOfInputs:1, numberOfOutputs:1, outputChannelCount:[1] });
   let cb: (c: Float32Array)=>void = ()=>undefined;
   let stopped: (()=>void)|null = null;
   n.port.onmessage = (e: MessageEvent) => {
@@ -237,6 +237,9 @@ export class AudioEngine {
     limiter.connect(pan);
     pan.connect(monitor); monitor.connect(ctx.destination);
     limiter.connect(capture.node);
+    // Keep the capture worklet in the running graph even when nothing plays out loud:
+    const captureSink = ctx.createGain(); captureSink.gain.value=0;
+    capture.node.connect(captureSink); captureSink.connect(ctx.destination);
     limiter.connect(analyser);
     if(ghost) limiter.connect(ghost);
     capture.onChunk((c)=>this.chunks.push(c));
