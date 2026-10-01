@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AudioEngine, EngineStartError, type EngineSettings } from '../audio/engine';
 import { encodeWav } from '../audio/wav';
-import { defaultTitle, listRecordings, listVoices, newId, saveRecording, spoolAppend, spoolClear, spoolPieces, spoolSessions, requestPersistentStorage, type Recording, type VoiceProfile } from '../storage/db';
+import { defaultTitle, logError, listRecordings, listVoices, newId, saveRecording, spoolAppend, spoolClear, spoolPieces, spoolSessions, requestPersistentStorage, type Recording, type VoiceProfile } from '../storage/db';
 import { concatChunks, pcmBytes, wavHeader } from '../audio/wav';
 import { onBackupChange, queueBackup, resumeBackups } from '../storage/backup';
 import { enqueueTranscription, onTranscribe, resumePendingTranscriptions } from '../transcribe/queue';
@@ -208,7 +208,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await flushSpool(tail);
       spool.current=null;
       rec=sp?await finalizeSpool(sp.session):null;
-    }catch{setError('Your phone is out of storage space. What was recorded is kept and will be recovered next launch.');return null;}
+    }catch(err){logError('stopRecording',err);setError(`Could not save: ${(err as Error).message||'unknown error'}. What was recorded is kept and will be recovered next launch.`);return null;}
     if(!rec){setError('That recording was under half a second, so it was not saved.');return null;}
     if(settings.activeVoiceId){rec.voiceProfileId=settings.activeVoiceId;await saveRecording(rec);}
     await refresh();

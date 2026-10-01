@@ -65,10 +65,23 @@ export const newId = () =>
 
 export async function listRecordings(): Promise<Recording[]> {
   const all = await (await db()).getAllFromIndex('recordings', 'byDate');
-  return all.reverse();
+  return all.reverse().map((r) => hydrate(r)!) ;
 }
-export async function getRecording(id: string) { return (await db()).get('recordings', id); }
-export async function saveRecording(r: Recording) { await (await db()).put('recordings', r); }
+export async function getRecording(id: string) { return hydrate(await (await db()).get('recordings', id)); }
+function hydrate(r: Recording | undefined): Recording | undefined {
+  if (r && !(r.audio instanceof Blob)) r.audio = new Blob([r.audio as unknown as BlobPart], { type: 'audio/wav' });
+  return r;
+}
+export async function saveRecording(r: Recording) {
+  const d = await db();
+  // Some Android WebViews choke on storing Blobs: keep audio as bytes on disk.
+  const bytes = r.audio instanceof Blob ? new Uint8Array(await r.audio.arrayBuffer()) : r.audio;
+  const row = { ...r, audio: bytes } as unknown as Recording;
+  await d.put('recordings', row);
+  // Verify it actually landed; throw loudly if not so the UI can tell the user.
+  const check = await d.get('recordings', r.id);
+  if (!check) throw new Error('The recording did not save to storage.');
+}
 export async function deleteRecording(id: string) { await (await db()).delete('recordings', id); }
 export async function patchRecording(id: string, patch: Partial<Recording>) {
   const d = await db();
@@ -114,4 +127,17 @@ export async function spoolClear(session: string) {
 /** Ask the browser/WebView not to delete our storage when the phone gets low on space. */
 export async function requestPersistentStorage(): Promise<boolean> {
   try { return (await navigator.storage?.persisted?.()) || (await navigator.storage?.persist?.()) || false; } catch { return false; }
+}
+
+/** Last few errors, kept so the Help screen can show what actually failed on this phone. */
+const ERR_KEY = 'earshot.errlog.v1';
+export function logError(where: string, err: unknown) {
+  try {
+    const list = JSON.parse(localStorage.getItem(ERR_KEY) || '[]');
+    list.unshift({ at: Date.now(), where, msg: (err as Error)?.message ?? String(err) });
+    localStorage.setItem(ERR_KEY, JSON.stringify(list.slice(0, 20)));
+  } catch { /* ignore */ }
+}
+export function readErrorLog(): { at: number; where: string; msg: string }[] {
+  try { return JSON.parse(localStorage.getItem(ERR_KEY) || '[]'); } catch { return []; }
 }
