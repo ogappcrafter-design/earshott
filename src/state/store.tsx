@@ -171,10 +171,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   },[engine,startLive]);
 
   const startRecording = useCallback(async()=>{
-    if(!engine.running&&!(await startLive())) return;
+    logError('rec:start',`running=${engine.running}`);
+    if(!engine.running&&!(await startLive())){logError('rec:start','startLive failed');return;}
     const session=newId(), startedAt=Date.now();
     spool.current={session,seq:0,startedAt};
     engine.startRecording();setRecording(true);setRecordStartedAt(startedAt);setBookmarks([]);
+    logError('rec:started',`session=${session} engineRecording=${engine.recording}`);
   },[engine,startLive]);
 
   const spool = useRef<{session:string;seq:number;startedAt:number}|null>(null);
@@ -201,13 +203,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const stopRecording = useCallback(async()=>{
     const tail=await engine.stopRecording();
+    logError('rec:stop',`tailFrames=${tail.length}`);
     setRecording(false);setRecordStartedAt(null);
     const sp=spool.current;
     let rec:Recording|null=null;
     try{
       await flushSpool(tail);
       spool.current=null;
+      const pc = sp ? (await spoolPieces(sp.session)).length : 0;
+      logError('rec:spooled',`session=${sp?.session} pieces=${pc}`);
       rec=sp?await finalizeSpool(sp.session):null;
+      logError('rec:finalized',`saved=${!!rec} id=${rec?.id}`);
     }catch(err){logError('stopRecording',err);setError(`Could not save: ${(err as Error).message||'unknown error'}. What was recorded is kept and will be recovered next launch.`);return null;}
     if(!rec){setError('That recording was under half a second, so it was not saved.');return null;}
     if(settings.activeVoiceId){rec.voiceProfileId=settings.activeVoiceId;await saveRecording(rec);}

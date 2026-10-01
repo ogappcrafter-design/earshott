@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { TRANSCRIBE_MODELS } from '../transcribe/queue';
 import { useStore } from '../state/store';
+import { readErrorLog } from '../storage/db';
 import { DEFAULT_SETTINGS } from '../state/settings';
 import { WordArt } from '../ui/WordArt';
 import { Button, Confirm, Toggle } from '../ui/Controls';
@@ -80,6 +81,13 @@ export function Settings({ onHearingCheck, onReplayTutorial, toast }: { onHearin
         <details><summary>Where are my saved files?</summary><p>“Save to phone” puts WAV files in Documents/Earshot. Open them with any file manager.</p></details>
         <details><summary>Is this a hearing aid?</summary><p>No. Earshot is a personal sound amplifier. For hearing loss, an audiologist can fit a medical device.</p></details>
         <a className="btn btn--ghost" href={`mailto:${SUPPORT_EMAIL}?subject=Earshot%20feedback`}>Send feedback</a>
+      </section>
+
+      <section className="panel">
+        <h3>Diagnostics</h3>
+        <p className="fine">If recordings aren’t saving, record a short test, come here, and tap Copy. Send it in feedback.</p>
+        <pre className="diaglog">{readErrorLog().slice(0,12).map((e)=>`${e.where}: ${e.msg}`).join('\n')||'No errors logged yet.'}</pre>
+        <Button variant="ghost" onClick={()=>{navigator.clipboard?.writeText(JSON.stringify(readErrorLog(),null,2)).then(()=>toast('Copied diagnostics'),()=>toast('Could not copy'));}}>Copy diagnostics</Button>
       </section>
 
       <Button variant="danger" onClick={() => setReset(true)}>Reset all settings</Button>
