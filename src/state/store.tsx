@@ -202,21 +202,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   },[recordStartedAt]);
 
   const stopRecording = useCallback(async()=>{
-    const tail=await engine.stopRecording();
+    const tail=await engine.stopRecording();   // all audio captured since the last disk flush
     logError('rec:stop',`tailFrames=${tail.length}`);
     setRecording(false);setRecordStartedAt(null);
-    const sp=spool.current;
+    const sp=spool.current; spool.current=null;
+    const sr=engine.sampleRate, bits=settings.bitDepth;
     let rec:Recording|null=null;
     try{
-      await flushSpool(tail);
-      spool.current=null;
-      const pc = sp ? (await spoolPieces(sp.session)).length : 0;
-      logError('rec:spooled',`session=${sp?.session} pieces=${pc}`);
-      rec=sp?await finalizeSpool(sp.session):null;
-      logError('rec:finalized',`saved=${!!rec} id=${rec?.id}`);
-    }catch(err){logError('stopRecording',err);setError(`Could not save: ${(err as Error).message||'unknown error'}. What was recorded is kept and will be recovered next launch.`);return null;}
-    if(!rec){setError('That recording was under half a second, so it was not saved.');return null;}
-    if(settings.activeVoiceId){rec.voiceProfileId=settings.activeVoiceId;await saveRecording(rec);}
+      // Build the file from whatever reached disk during recording PLUS the tail we hold right now.
+      const pieces = sp ? await spoolPieces(sp.session) : [];
+      const framesSpooled = pieces.reduce((n,p)=>n+p.frames,0);
+      const totalFrames = framesSpooled + tail.length;
+      logError('rec:assemble',`spooled=${pieces.length} tail=${tail.length} total=${totalFrames}`);
+      if(totalFrames < sr*0.5){ if(sp) await spoolClear(sp.session); setError('That recording was under half a second, so it was not saved.'); return null; }
+      const tailBlob = tail.length ? new Blob([pcmBytes(tail,bits)]) : null;
+      const audio = new Blob([wavHeader(totalFrames,sr,bits), ...pieces.map((p)=>p.pcm), ...(tailBlob?[tailBlob]:[])], {type:'audio/wav'});
+      rec = { id:newId(), title:defaultTitle(sp?new Date(sp.startedAt):undefined), createdAt: sp?.startedAt ?? Date.now(),
+        durationSec: totalFrames/sr, sampleRate:sr, bitDepth:bits, sizeBytes:audio.size, audio,
+        bookmarks: bookmarksRef.current, voiceProfileId: settings.activeVoiceId, transcript:null, transcriptStatus:'none' };
+      await saveRecording(rec);   // verifies the write; throws if it didn't land
+      if(sp) await spoolClear(sp.session);
+      logError('rec:saved',`id=${rec.id} frames=${totalFrames}`);
+    }catch(err){logError('stopRecording',err);setError(`Could not save: ${(err as Error).message||'unknown error'}.`);return null;}
     await refresh();
     if(settings.autoTranscribe) enqueueTranscription(rec.id,settings.transcribeModel,settings.language).then(refresh);
     else queueBackup(rec.id,backupRef.current);
