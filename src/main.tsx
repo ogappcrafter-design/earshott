@@ -21,3 +21,4 @@ setInterval(() => {
   const m = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
   logError('beat', `heap=${m ? Math.round(m.usedJSHeapSize / 1048576) + 'MB' : 'n/a'}`);
 }, 15000);
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('/sw.js').catch(() => undefined);
