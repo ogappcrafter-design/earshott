@@ -21,7 +21,6 @@ let current: { model: string; asr: ASR } | null = null;
 async function hasWebGPU(): Promise<boolean> {
   return false; // GPU path crashes some phone WebViews; stability first
 }
-}
 
 async function load(model: string, cpu = false) {
   if (current?.model === model) return current.asr;
