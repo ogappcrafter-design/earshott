@@ -19,8 +19,8 @@ let current: { model: string; asr: ASR } | null = null;
 
 /** Use the phone's GPU when the WebView supports it (often 5-10x faster), otherwise multi-threaded CPU. */
 async function hasWebGPU(): Promise<boolean> {
-  try { const gpu = (navigator as unknown as { gpu?: { requestAdapter(): Promise<unknown> } }).gpu; return !!(gpu && (await gpu.requestAdapter())); }
-  catch { return false; }
+  return false; // GPU path crashes some phone WebViews; stability first
+}
 }
 
 async function load(model: string, cpu = false) {

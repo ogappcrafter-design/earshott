@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AudioEngine, EngineStartError, type EngineSettings } from '../audio/engine';
 import { encodeWav } from '../audio/wav';
-import { defaultTitle, logError, listRecordings, listVoices, newId, saveRecording, spoolAppend, spoolClear, spoolPieces, spoolSessions, requestPersistentStorage, type Recording, type VoiceProfile } from '../storage/db';
+import { defaultTitle, logError, patchRecording, listRecordings, listVoices, newId, saveRecording, spoolAppend, spoolClear, spoolPieces, spoolSessions, requestPersistentStorage, type Recording, type VoiceProfile } from '../storage/db';
 import { concatChunks, pcmBytes, wavHeader } from '../audio/wav';
 import { onBackupChange, queueBackup, resumeBackups } from '../storage/backup';
 import { enqueueTranscription, onTranscribe, resumePendingTranscriptions } from '../transcribe/queue';
@@ -107,8 +107,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       for(const sess of await spoolSessions()){
         try{ if(await finalizeSpool(sess,`Recovered — ${defaultTitle()}`)) rescued++; }catch{/* keep the pieces for next launch */}
       }
+      // Crash-loop breaker: if the last run never reached "stable", don't restart heavy work that probably killed it
+      const prev = localStorage.getItem('earshot.boot');
+      localStorage.setItem('earshot.boot','starting');
+      setTimeout(()=>localStorage.setItem('earshot.boot','ok'),20000);
+      const crashed = prev === 'starting';
+      if(crashed){
+        logError('boot','previous run did not survive 20s: pausing transcription');
+        for(const r of await listRecordings()){
+          if(r.transcriptStatus==='queued'||r.transcriptStatus==='working')
+            await patchRecording(r.id,{transcriptStatus:'failed',transcriptError:'Paused after the app closed. Open this recording and tap Transcribe to retry.'});
+        }
+        setSettings((x)=>({...x,autoTranscribe:false}));
+        setError('The app closed unexpectedly, so auto-transcribe is paused. Your recordings are safe. You can turn it back on in Settings.');
+      }
       await refresh();
-      resumePendingTranscriptions(settings.transcribeModel,settings.language).catch(()=>undefined);
+      if(!crashed) setTimeout(()=>resumePendingTranscriptions(settings.transcribeModel,settings.language).catch(()=>undefined),8000);
       if(rescued) setError(`Recovered ${rescued} recording${rescued>1?'s':''} that were cut off. They're in your archive.`);
     })().catch(()=>setError('Your archive could not be opened. Restart the app to try again.'));
   },[refresh,finalizeSpool]);
