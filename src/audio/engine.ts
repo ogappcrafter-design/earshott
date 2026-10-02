@@ -63,7 +63,7 @@ export interface EngineSettings {
 }
 
 export const DEFAULT_ENGINE_SETTINGS: EngineSettings = {
-  volumeDb: 10, noiseReduction: 0.5, spectralAmount: 0.5, voiceFocus: 0,
+  volumeDb: 10, noiseReduction: 0.5, spectralAmount: 0, voiceFocus: 0,
   focusTarget: null, balance: 0,
   eq: normalizeGains(EQ_PRESETS.find((p)=>p.id==='speech')?.gains),
   lock: null, lock2: null, mutes: [], deviceNoiseSuppression: false, limiterDb: -6,
