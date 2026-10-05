@@ -73,7 +73,7 @@ export function loadSettings(storage: Pick<Storage,'getItem'> = localStorage): A
     if (!engine.audioZoom) engine.audioZoom = 'off';
     if (engine.spectralAmount == null) engine.spectralAmount = 0;
     // one-time: the live denoiser was too heavy for some phones, so it starts off for everyone
-    if (!localStorage.getItem('earshot.spectral0')) { engine.spectralAmount = 0; localStorage.setItem('earshot.spectral0', '1'); }
+    if (!storage.getItem('earshot.spectral0')) { engine.spectralAmount = 0; try { globalThis.localStorage?.setItem('earshot.spectral0', '1'); } catch { /* ignore */ } }
     return { ...DEFAULT_SETTINGS, ...p, engine, hearingEq: p.hearingEq ? normalizeGains(p.hearingEq) : null };
   } catch {
     return structuredClone(DEFAULT_SETTINGS);

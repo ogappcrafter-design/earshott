@@ -13,7 +13,7 @@ const NICE = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 15000];
 
 // plum → brass → mint heat map
 const LUT = (() => {
-  const stops: [number, [number, number, number]][] = [[0, [11, 15, 18]], [0.25, [22, 42, 52]], [0.5, [44, 92, 98]], [0.75, [98, 142, 150]], [1, [168, 190, 196]]];
+  const stops: [number, [number, number, number]][] = [[0, [15, 20, 17]], [0.25, [28, 48, 36]], [0.5, [74, 110, 70]], [0.75, [196, 138, 92]], [1, [226, 214, 176]]];
   const out = new Uint8ClampedArray(256 * 3);
   for (let i = 0; i < 256; i++) {
     const x = i / 255; let k = 0; while (k < stops.length - 2 && x > stops[k + 1][0]) k++;
@@ -47,7 +47,7 @@ export function Scope({ analyser, active, sensitivity, lock, mutes, selectedId, 
     const resize = () => {
       const w = Math.max(1, Math.round(cv.clientWidth * dpr)), h = Math.max(1, Math.round(cv.clientHeight * dpr));
       if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
-      if (off.width !== w) { off.width = w; off.height = ROWS; og.fillStyle = '#0B0F12'; og.fillRect(0, 0, w, ROWS); }
+      if (off.width !== w) { off.width = w; off.height = ROWS; og.fillStyle = '#0F1411'; og.fillRect(0, 0, w, ROWS); }
     };
     resize();
     const ro = new ResizeObserver(resize); ro.observe(cv);
@@ -100,13 +100,13 @@ export function Scope({ analyser, active, sensitivity, lock, mutes, selectedId, 
       for (const hz of NICE) {
         if (hz < v.minHz || hz > v.maxHz) continue;
         const y = yOf(hz);
-        g.fillStyle = 'rgba(169,179,184,.08)'; g.fillRect(0, y, W, dpr);
-        g.fillStyle = 'rgba(169,179,184,.5)'; g.fillText(`${fmtHz(hz)} Hz`, 6 * dpr, y - 8 * dpr);
+        g.fillStyle = 'rgba(203,207,195,.08)'; g.fillRect(0, y, W, dpr);
+        g.fillStyle = 'rgba(203,207,195,.5)'; g.fillText(`${fmtHz(hz)} Hz`, 6 * dpr, y - 8 * dpr);
       }
       // muted sounds
       for (const m of L.mutes) {
         const half = m.centerHz / m.q / 2; const y1 = yOf(m.centerHz + half), y2 = yOf(Math.max(20, m.centerHz - half));
-        g.fillStyle = 'rgba(168,102,90,.14)'; g.fillRect(0, y1, W, Math.max(2 * dpr, y2 - y1));
+        g.fillStyle = 'rgba(201,120,78,.14)'; g.fillRect(0, y1, W, Math.max(2 * dpr, y2 - y1));
       }
       // band sources: divider lines between sounds
       const { bands, voices } = frameRef.current;
@@ -115,17 +115,17 @@ export function Scope({ analyser, active, sensitivity, lock, mutes, selectedId, 
         const y1 = yOf(b.highHz), y2 = yOf(b.lowHz);
         if (y2 < 0 || y1 > H) continue;
         const sel = L.selectedId === b.id || (L.lock?.kind === 'band' && Math.abs(Math.log(L.lock.peakHz / b.peakHz)) < 0.15);
-        if (sel) { g.fillStyle = 'rgba(143,167,184,.12)'; g.fillRect(0, y1, W, y2 - y1); }
+        if (sel) { g.fillStyle = 'rgba(196,138,92,.12)'; g.fillRect(0, y1, W, y2 - y1); }
         g.setLineDash([6 * dpr, 5 * dpr]); g.lineWidth = dpr * (sel ? 2 : 1.2);
-        g.strokeStyle = sel ? 'rgba(143,167,184,.9)' : 'rgba(169,179,184,.55)';
+        g.strokeStyle = sel ? 'rgba(196,138,92,.9)' : 'rgba(203,207,195,.55)';
         g.beginPath(); g.moveTo(0, y1); g.lineTo(W, y1); g.moveTo(0, y2); g.lineTo(W, y2); g.stroke();
         g.setLineDash([]);
-        labels.push({ y: (Math.max(0, y1) + Math.min(H, y2)) / 2, text: `${b.label}  ${fmtHz(b.lowHz)}–${fmtHz(b.highHz)}`, color: sel ? '#8FA7B8' : 'rgba(169,179,184,.85)' });
+        labels.push({ y: (Math.max(0, y1) + Math.min(H, y2)) / 2, text: `${b.label}  ${fmtHz(b.lowHz)}–${fmtHz(b.highHz)}`, color: sel ? '#C48A5C' : 'rgba(203,207,195,.85)' });
       }
       // heard voices: permanent guide lines so they can be found even when quiet
       for (const p of L.pinned) {
         const y = yOf(p.hz); if (y < 0 || y > H) continue;
-        const col = `hsl(${p.hue} 34% 58%)`;
+        const col = `hsl(${p.hue} 32% 58%)`;
         g.globalAlpha = p.locked ? 0.9 : p.present ? 0.6 : 0.3;
         g.strokeStyle = col; g.lineWidth = dpr * (p.locked ? 2.5 : 1.2);
         g.setLineDash(p.locked ? [] : [2 * dpr, 6 * dpr]);
@@ -137,7 +137,7 @@ export function Scope({ analyser, active, sensitivity, lock, mutes, selectedId, 
       // voice sources: glowing pitch tracks plus harmonic ticks
       for (const vo of voices) {
         const sel = L.selectedId === vo.id || (L.lock?.kind === 'voice' && Math.abs(Math.log(L.lock.medianHz / vo.medianHz)) < 0.1) || (L.lock2?.kind === 'voice' && Math.abs(Math.log(L.lock2.medianHz / vo.medianHz)) < 0.1);
-        const color = `hsl(${vo.hue} 34% 58%)`;
+        const color = `hsl(${vo.hue} 32% 58%)`;
         g.strokeStyle = color; g.lineWidth = dpr * (sel ? 3.5 : 2.2); g.shadowColor = color; g.shadowBlur = sel ? 14 * dpr : 6 * dpr;
         g.beginPath(); let pen = false;
         const hist = vo.history;
@@ -163,11 +163,11 @@ export function Scope({ analyser, active, sensitivity, lock, mutes, selectedId, 
       for (const l of labels) {
         if (l.y < 0) continue;
         const tw = g.measureText(l.text).width + 12 * dpr;
-        g.fillStyle = 'rgba(11,15,18,.8)'; g.fillRect(W - tw - 34 * dpr, l.y - 10 * dpr, tw, 20 * dpr);
+        g.fillStyle = 'rgba(15,20,17,.8)'; g.fillRect(W - tw - 34 * dpr, l.y - 10 * dpr, tw, 20 * dpr);
         g.fillStyle = l.color; g.fillText(l.text, W - tw - 28 * dpr, l.y);
       }
       if (!active) {
-        g.fillStyle = 'rgba(11,15,18,.55)'; g.fillRect(0, 0, W, H);
+        g.fillStyle = 'rgba(15,20,17,.55)'; g.fillRect(0, 0, W, H);
       }
     };
     raf = requestAnimationFrame(draw);
