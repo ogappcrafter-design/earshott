@@ -1,0 +1,79 @@
+name: Build Android app
+
+on:
+  push:
+    branches: [main]
+    paths: ['src/**', 'android/**', 'public/**', 'index.html', 'package.json', 'package-lock.json', 'capacitor.config.ts', 'vite.config.*', '.github/workflows/android.yml']
+  workflow_dispatch:
+
+concurrency:
+  group: android-build
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Web build and sync
+        run: |
+          npm ci
+          npm run build
+          npx cap sync android
+
+      # A fixed signing key for the downloadable build, so new versions install OVER the old one
+      # and never wipe your recordings. (The Play Store key is separate and is never stored here.)
+      - name: Make or reuse the download-build signing key
+        run: |
+          if [ ! -f android/sideload.keystore ]; then
+            keytool -genkeypair -keystore android/sideload.keystore -alias sideload \
+              -keyalg RSA -keysize 2048 -validity 36500 \
+              -storepass earshot-sideload -keypass earshot-sideload -dname "CN=Earshot Download Build"
+            git config user.name "earshot-build"
+            git config user.email "build@users.noreply.github.com"
+            git add android/sideload.keystore
+            git commit -m "Add download-build signing key"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+          cat > android/keystore.properties <<PROPS
+          storeFile=../sideload.keystore
+          storePassword=earshot-sideload
+          keyAlias=sideload
+          keyPassword=earshot-sideload
+          PROPS
+          sed -i 's/^ *//' android/keystore.properties
+
+      - name: Accept Android licenses
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - name: Build signed APK
+        working-directory: android
+        run: |
+          sed -i "s/versionCode [0-9]*/versionCode ${GITHUB_RUN_NUMBER}/" app/build.gradle
+          sed -i "s/versionName \"[^\"]*\"/versionName \"1.${GITHUB_RUN_NUMBER}\"/" app/build.gradle
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      - name: Publish the download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk earshot.apk
+          gh release view latest >/dev/null 2>&1 || gh release create latest --title "Earshot for Android (latest)" --notes "Newest Android build. Download earshot.apk."
+          gh release upload latest earshot.apk --clobber
