@@ -31,3 +31,7 @@
 -keep class com.getcapacitor.** { *; }
 -keepclassmembers class * { @android.webkit.JavascriptInterface <methods>; }
 -dontwarn com.getcapacitor.**
+
+# Native service + plugin (looked up by name at runtime)
+-keep class com.outboxenter.earshot.** { *; }
+-keepattributes *Annotation*

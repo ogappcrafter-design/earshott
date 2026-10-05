@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { TRANSCRIBE_MODELS } from '../transcribe/queue';
 import { useStore } from '../state/store';
+import { isNative } from '../native/background';
 import { readErrorLog } from '../storage/db';
 import { DEFAULT_SETTINGS } from '../state/settings';
 import { WordArt } from '../ui/WordArt';
@@ -28,6 +29,15 @@ export function Settings({ onHearingCheck, onReplayTutorial, toast }: { onHearin
         </div>
         <p className="fine">48 kHz WAV. One minute is about {s.settings.bitDepth === 16 ? '5.5' : '8.3'} MB.</p>
       </section>
+
+      {!isNative && (
+        <section className="panel">
+          <h3>Android app</h3>
+          <p className="fine">The full app records from a quiet notification even when closed, and keeps working with the screen off.</p>
+          <a className="btn btn--primary" href="https://github.com/ogappcrafter-design/earshott/releases/latest/download/earshot.apk" download>⬇ Download for Android</a>
+          <p className="fine">Open the file after it downloads. If Android asks, allow installs from Chrome.</p>
+        </section>
+      )}
 
       <section className="panel">
         <h3>Email backup</h3>
