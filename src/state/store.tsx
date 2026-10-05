@@ -3,6 +3,8 @@ import { AudioEngine, EngineStartError, type EngineSettings } from '../audio/eng
 import { encodeWav } from '../audio/wav';
 import { defaultTitle, logError, patchRecording, listRecordings, listVoices, newId, saveRecording, spoolAppend, spoolClear, spoolPieces, spoolSessions, requestPersistentStorage, type Recording, type VoiceProfile } from '../storage/db';
 import { concatChunks, pcmBytes, wavHeader } from '../audio/wav';
+import { importBackgroundRecordings, isNative, onBackgroundState, startBackground } from '../native/background';
+import { App as CapApp } from '@capacitor/app';
 import { onBackupChange, queueBackup, resumeBackups } from '../storage/backup';
 import { enqueueTranscription, onTranscribe, resumePendingTranscriptions } from '../transcribe/queue';
 import { loadSettings, saveSettings, type AppSettings } from './settings';
@@ -129,6 +131,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const backupCfg = useMemo(()=>({emailBackup:settings.emailBackup,backupKey:settings.backupKey,deleteAfterSend:settings.deleteAfterSend}),
     [settings.emailBackup,settings.backupKey,settings.deleteAfterSend]);
   const backupRef = useRef(backupCfg); backupRef.current = backupCfg;
+  const settingsRef = useRef(settings); settingsRef.current = settings;
+
+  // Background service: quiet notification with Record / Stop that works with the app closed
+  useEffect(()=>{
+    if(!isNative) return;
+    const pull=async()=>{
+      const ids=await importBackgroundRecordings();
+      if(!ids.length) return;
+      await refresh();
+      for(const id of ids){
+        const st=settingsRef.current;
+        if(st.autoTranscribe) enqueueTranscription(id,st.transcribeModel,st.language).then(refresh).catch(()=>undefined);
+        else queueBackup(id,backupRef.current);
+      }
+    };
+    startBackground(); pull();
+    const offState=onBackgroundState((rec)=>{ if(!rec) pull(); });
+    const appH=CapApp.addListener('appStateChange',(st)=>{ if(st.isActive){ startBackground(); pull(); } });
+    return ()=>{ offState(); appH.then((h)=>h.remove()).catch(()=>undefined); };
+  },[refresh]);
+  useEffect(()=>{ if(live) startBackground(); },[live]);
   useEffect(()=>onTranscribe((e)=>{
     if(e.type==='download') setDownloadProgress(e.progress>=100?null:e.progress);
     else{if(e.type!=='status') setDownloadProgress(null); refresh();}
