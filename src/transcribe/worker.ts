@@ -9,7 +9,7 @@ env.allowLocalModels = false;
 const onnx = env.backends.onnx as { wasm?: { wasmPaths?: unknown; numThreads?: number } };
 if (onnx.wasm) {
   onnx.wasm.wasmPaths = { mjs: new URL(ortMjs, self.location.href).href, wasm: new URL(ortWasm, self.location.href).href };
-  onnx.wasm.numThreads = self.crossOriginIsolated ? Math.min(4, navigator.hardwareConcurrency || 2) : 1;
+  onnx.wasm.numThreads = self.crossOriginIsolated ? Math.min(2, navigator.hardwareConcurrency || 2) : 1;
 }
 
 type Req = { id: string; audio: Float32Array; model: string; language: string | null; cpu?: boolean };

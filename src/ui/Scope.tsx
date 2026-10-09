@@ -44,17 +44,19 @@ export function Scope({ analyser, active, sensitivity, lock, mutes, selectedId, 
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     const off = document.createElement('canvas');
     const og = off.getContext('2d')!;
+    let head = 0; // next column to write: the waterfall is a ring buffer, so nothing is ever copied onto itself
     const resize = () => {
       const w = Math.max(1, Math.round(cv.clientWidth * dpr)), h = Math.max(1, Math.round(cv.clientHeight * dpr));
       if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
-      if (off.width !== w) { off.width = w; off.height = ROWS; og.fillStyle = '#0F1411'; og.fillRect(0, 0, w, ROWS); }
+      if (off.width !== w) { head = 0; off.width = w; off.height = ROWS; og.fillStyle = '#0F1411'; og.fillRect(0, 0, w, ROWS); }
     };
     resize();
     const ro = new ResizeObserver(resize); ro.observe(cv);
 
     const tracker = analyser ? new SourceTracker(analyser.context.sampleRate, analyser.fftSize) : null;
     const db = new Float32Array(analyser?.frequencyBinCount ?? 1);
-    const col = og.createImageData(STEP, ROWS);
+    const cols = new Map<number, ImageData>();
+    const colFor = (k: number) => { let c = cols.get(k); if (!c) { c = og.createImageData(STEP * k, ROWS); cols.set(k, c); } return c; };
     // precompute which FFT bins each waterfall row covers
     const sr = analyser?.context.sampleRate ?? 48000, fft = analyser?.fftSize ?? 8192;
     const rowBins = Array.from({ length: ROWS }, (_, y) => {
@@ -63,12 +65,23 @@ export function Scope({ analyser, active, sensitivity, lock, mutes, selectedId, 
       return [a, Math.min(db.length - 1, b)] as const;
     });
     let raf = 0; let lastPublish = 0;
+    let lastFrame = 0, interval = 50, costAvg = 0; // heavy work runs ~20x/s, slower if this phone struggles
+    let lastView = viewRef.current;
 
     const draw = (now: number) => {
       raf = requestAnimationFrame(draw);
+      if (document.hidden) { lastFrame = 0; return; } // nothing runs while the app is in the background
+      const viewChanged = viewRef.current !== lastView; lastView = viewRef.current;
+      const due = !lastFrame || now - lastFrame >= interval;
+      if (!due && !viewChanged) return;
+      const t0 = performance.now();
+      const dt = lastFrame ? now - lastFrame : interval;
       const W = cv.width, H = cv.height;
       const L = live.current;
-      if (active && analyser && tracker) {
+      if (due && active && analyser && tracker) {
+        lastFrame = now;
+        const k = Math.max(1, Math.min(8, Math.round(dt / 16.7))); // keep the time scale steady at any frame rate
+        const cw = STEP * k, col = colFor(k);
         tracker.sensitivity = L.sensitivity;
         tracker.hints = [...L.pinned.map((p) => p.hz),
           ...(L.lock?.kind === 'voice' ? [L.lock.medianHz] : []), ...(L.lock2?.kind === 'voice' ? [L.lock2.medianHz] : [])];
@@ -80,19 +93,25 @@ export function Scope({ analyser, active, sensitivity, lock, mutes, selectedId, 
           const [a, b] = rowBins[y]; let m = 0;
           for (let k = a; k <= b; k++) if (f.excess[k] > m) m = f.excess[k];
           const v = Math.min(255, Math.round(m * gain));
-          for (let x = 0; x < STEP; x++) {
-            const p = (y * STEP + x) * 4;
+          for (let x = 0; x < cw; x++) {
+            const p = (y * cw + x) * 4;
             col.data[p] = LUT[v * 3]; col.data[p + 1] = LUT[v * 3 + 1]; col.data[p + 2] = LUT[v * 3 + 2]; col.data[p + 3] = 255;
           }
         }
-        og.drawImage(off, -STEP, 0);
-        og.putImageData(col, off.width - STEP, 0);
+        if (head + cw > off.width) head = 0;
+        og.putImageData(col, head, 0);
+        head += cw; if (head >= off.width) head = 0;
         if (now - lastPublish > 250) { lastPublish = now; L.onSnapshot(frameRef.current); }
       }
       const v = viewRef.current;
       const topF = hzToFrac(v.maxHz, FULL_VIEW), botF = hzToFrac(v.minHz, FULL_VIEW);
       g.imageSmoothingEnabled = true;
-      g.drawImage(off, 0, (1 - topF) * ROWS, off.width, (topF - botF) * ROWS, 0, 0, W, H);
+      {
+        // oldest column is at `head`, newest just before it: draw the two pieces side by side
+        const sy = (1 - topF) * ROWS, sh = (topF - botF) * ROWS, ow = off.width, a = ow - head, dx = (a / ow) * W;
+        if (a > 0) g.drawImage(off, head, sy, a, sh, 0, 0, dx, H);
+        if (head > 0) g.drawImage(off, 0, sy, head, sh, dx, 0, W - dx, H);
+      }
       const yOf = (hz: number) => (1 - hzToFrac(hz, v)) * H;
 
       // frequency grid
@@ -169,6 +188,9 @@ export function Scope({ analyser, active, sensitivity, lock, mutes, selectedId, 
       if (!active) {
         g.fillStyle = 'rgba(15,20,17,.55)'; g.fillRect(0, 0, W, H);
       }
+      // adapt: if a frame costs a lot on this phone, do the heavy work less often
+      costAvg = costAvg * 0.9 + (performance.now() - t0) * 0.1;
+      interval = costAvg > 30 ? 100 : costAvg > 14 ? 66 : 50;
     };
     raf = requestAnimationFrame(draw);
     return () => { cancelAnimationFrame(raf); ro.disconnect(); };

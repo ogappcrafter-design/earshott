@@ -37,7 +37,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hearingEq: null,
   activeVoiceId: null,
   bitDepth: 24,
-  transcribeModel: 'onnx-community/whisper-base.en',
+  transcribeModel: 'onnx-community/whisper-tiny.en',
   language: null,
   autoTranscribe: true,
   emailBackup: false,
@@ -74,6 +74,8 @@ export function loadSettings(storage: Pick<Storage,'getItem'> = localStorage): A
     if (engine.spectralAmount == null) engine.spectralAmount = 0;
     // one-time: the live denoiser was too heavy for some phones, so it starts off for everyone
     if (!storage.getItem('earshot.spectral0')) { engine.spectralAmount = 0; try { globalThis.localStorage?.setItem('earshot.spectral0', '1'); } catch { /* ignore */ } }
+    // one-time: bigger Whisper models can run a phone browser tab out of memory, so everyone starts on the light one
+    if (!storage.getItem('earshot.model1')) { p.transcribeModel = 'onnx-community/whisper-tiny.en'; try { globalThis.localStorage?.setItem('earshot.model1', '1'); } catch { /* ignore */ } }
     return { ...DEFAULT_SETTINGS, ...p, engine, hearingEq: p.hearingEq ? normalizeGains(p.hearingEq) : null };
   } catch {
     return structuredClone(DEFAULT_SETTINGS);

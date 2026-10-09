@@ -11,6 +11,11 @@ let worker: Worker | null = null;
 let forceCpu = false;
 const queue: { id: string; model: string; language: string | null }[] = [];
 let busy = false;
+let paused = false;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Transcription waits while you record, so it never competes with the live audio for the phone's processor. */
+export function setTranscriptionPaused(on: boolean) { paused = on; if (!on) pump(); }
 
 function getWorker() {
   if (!worker) worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
@@ -67,7 +72,7 @@ function runPiece(audio: Float32Array, job: { id: string; model: string; languag
 }
 
 async function pump() {
-  if (busy) return;
+  if (busy || paused) return;
   const job = queue.shift();
   if (!job) return;
   busy = true;
@@ -85,6 +90,7 @@ async function pump() {
     let retried = false;
 
     while (doneSec < total - 0.25) {
+      while (paused) await sleep(1000); // resume between pieces once recording stops
       const start = Math.round(doneSec * RATE);
       const end = start + PIECE_SEC * RATE >= audio.length ? audio.length : quietCut(audio, start + PIECE_SEC * RATE);
       emit({ type: 'status', id: job.id, status: 'transcribing', progress: Math.round((doneSec / total) * 100) });

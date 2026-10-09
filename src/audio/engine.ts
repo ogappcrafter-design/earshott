@@ -2,7 +2,7 @@ import { BAND_Q, EQ_BANDS, EQ_PRESETS, normalizeGains } from './eq';
 import { WORKLET_SOURCE } from './worklets';
 import { concatChunks } from './wav';
 import { dbToGain } from './hearing';
-import { scriptCapture, scriptGate, type CaptureHandle, type GateHandle } from './fallback';
+import { scriptCapture, scriptGate, scriptLimiter, type CaptureHandle, type GateHandle } from './fallback';
 import { makeDemoScene } from './demoSignal';
 
 async function tryLoadWorklets(ctx: AudioContext): Promise<boolean> {
@@ -210,6 +210,7 @@ export class AudioEngine {
     const amp = ctx.createGain();
     const limiter = ctx.createDynamicsCompressor();
     limiter.knee.value=0; limiter.ratio.value=20; limiter.attack.value=0.001; limiter.release.value=0.08;
+    const brick: AudioNode = this.legacy ? scriptLimiter(ctx) : new AudioWorkletNode(ctx, 'earshot-limiter', { numberOfInputs:1, numberOfOutputs:1, outputChannelCount:[1] });
     const pan = ctx.createStereoPanner();
     const monitor = ctx.createGain(); monitor.gain.value=0;
     const capture = this.legacy ? scriptCapture(ctx) : workletCapture(ctx);
@@ -232,16 +233,16 @@ export class AudioEngine {
     const firstNode = spectral ?? humLo;
     source.connect(firstNode);
     if (spectral){spectral.connect(humLo);}
-    const chain: AudioNode[] = [humLo,humHi,rumble,focusLow,focusFund,focusPresence,focusAir,focus2Fund,focus2Presence,...eq,...mutes,...howl,gate.node,leveler,hiss,amp,limiter];
+    const chain: AudioNode[] = [humLo,humHi,rumble,focusLow,focusFund,focusPresence,focusAir,focus2Fund,focus2Presence,...eq,...mutes,...howl,gate.node,leveler,hiss,amp,limiter,brick];
     for(let i=0;i<chain.length-1;i++) chain[i].connect(chain[i+1]);
-    limiter.connect(pan);
+    brick.connect(pan);
     pan.connect(monitor); monitor.connect(ctx.destination);
-    limiter.connect(capture.node);
+    brick.connect(capture.node);
     // Keep the capture worklet in the running graph even when nothing plays out loud:
     const captureSink = ctx.createGain(); captureSink.gain.value=0;
     capture.node.connect(captureSink); captureSink.connect(ctx.destination);
-    limiter.connect(analyser);
-    if(ghost) limiter.connect(ghost);
+    brick.connect(analyser);
+    if(ghost) brick.connect(ghost);
     capture.onChunk((c)=>this.chunks.push(c));
 
     this.nodes = {source,spectral,humLo,humHi,rumble,focusLow,focusFund,focusPresence,focusAir,focus2Fund,focus2Presence,howl,leveler,hiss,eq,mutes,raw,gate,amp,limiter,pan,monitor,capture,analyser,ghost};

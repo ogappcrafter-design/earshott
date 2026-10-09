@@ -6,7 +6,7 @@ import { concatChunks, pcmBytes, wavHeader } from '../audio/wav';
 import { importBackgroundRecordings, isNative, onBackgroundState, startBackground } from '../native/background';
 import { App as CapApp } from '@capacitor/app';
 import { onBackupChange, queueBackup, resumeBackups } from '../storage/backup';
-import { enqueueTranscription, onTranscribe, resumePendingTranscriptions } from '../transcribe/queue';
+import { enqueueTranscription, onTranscribe, resumePendingTranscriptions, setTranscriptionPaused } from '../transcribe/queue';
 import { loadSettings, saveSettings, type AppSettings } from './settings';
 import { setSfxEnabled } from '../ui/sfx';
 import { IS_TESTER } from '../demo';
@@ -158,6 +158,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Transcript finished (or gave up): ship it
     if(e.type==='done'||e.type==='error') queueBackup(e.id,backupRef.current);
   }),[refresh]);
+  useEffect(()=>{ setTranscriptionPaused(recording); },[recording]);
   useEffect(()=>onBackupChange(()=>{refresh().catch(()=>undefined);}),[refresh]);
   useEffect(()=>{
     resumeBackups(backupCfg).catch(()=>undefined);

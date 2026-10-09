@@ -14,11 +14,14 @@ class EarshotGate extends AudioWorkletProcessor {
   }
   constructor() {
     super();
-    this.env=0; this.floor=0.002; this.gain=1;
+    this.env=0; this.floor=0.002; this.gain=1; this.hold=0;
     this.attack=Math.exp(-1/(0.003*sampleRate));
     this.release=Math.exp(-1/(0.08*sampleRate));
-    this.floorUp=Math.exp(-1/(4*sampleRate));
+    this.floorUp=Math.exp(-1/(20*sampleRate));
     this.floorDn=Math.exp(-1/(0.4*sampleRate));
+    this.holdLen=Math.floor(0.3*sampleRate);
+    this.closeC=Math.exp(-1/(0.12*sampleRate));
+    this.openC=Math.exp(-1/(0.002*sampleRate));
   }
   process(inputs,outputs,params){
     const inp=inputs[0],out=outputs[0]; if(!inp||inp.length===0) return true;
@@ -30,10 +33,12 @@ class EarshotGate extends AudioWorkletProcessor {
       this.env=coef*this.env+(1-coef)*peak;
       const fc=this.env>this.floor?this.floorUp:this.floorDn;
       this.floor=Math.max(1e-5,fc*this.floor+(1-fc)*this.env);
-      const openAt=this.floor*(2+amount*4);
+      const openAt=this.floor*(1.5+amount*2.5);
       let target=1;
-      if(this.env<openAt){ const r=Math.max(0,this.env/openAt); target=Math.pow(r,1+amount*3); target=Math.max(target,1-amount*0.97); }
-      const gc=target<this.gain?0.995:0.9;
+      if(this.env>=openAt) this.hold=this.holdLen;
+      else if(this.hold>0) this.hold--;
+      else { const r=Math.max(0,this.env/openAt); target=Math.pow(r,1+amount*2); target=Math.max(target,1-amount*0.85); }
+      const gc=target<this.gain?this.closeC:this.openC;
       this.gain=gc*this.gain+(1-gc)*target;
       for(let c=0;c<out.length;c++) out[c][i]=(inp[c]||inp[0])[i]*this.gain;
     }
@@ -41,6 +46,40 @@ class EarshotGate extends AudioWorkletProcessor {
   }
 }
 registerProcessor('earshot-gate', EarshotGate);
+
+/* ─── Brickwall lookahead limiter: nothing ever exceeds the ceiling, so nothing clips ─── */
+class EarshotLimiter extends AudioWorkletProcessor {
+  constructor(){
+    super();
+    this.D=Math.max(8,Math.round(0.003*sampleRate));
+    this.dly=new Float32Array(this.D); this.req=new Float32Array(this.D).fill(1); this.mr=new Float32Array(this.D).fill(1);
+    this.p=0; this.sum=this.D; this.g=1; this.ceil=0.891;
+    this.rel=1/(0.15*sampleRate);
+  }
+  process(inputs,outputs){
+    const inp=inputs[0]&&inputs[0][0], out=outputs[0];
+    if(!inp||!out||!out[0]) return true;
+    const D=this.D, o=out[0];
+    for(let i=0;i<inp.length;i++){
+      const x=inp[i], a=Math.abs(x);
+      const p=this.p;
+      this.dly[p]=x;
+      this.req[p]=a>this.ceil?this.ceil/a:1;
+      let m=1; for(let k=0;k<D;k++){ const r=this.req[k]; if(r<m) m=r; }
+      this.sum+=m-this.mr[p]; this.mr[p]=m;
+      const avg=this.sum/D;
+      const up=this.g+this.rel;
+      this.g=avg<up?avg:up;
+      let y=this.dly[(p+1)%D]*this.g;
+      if(y>this.ceil) y=this.ceil; else if(y<-this.ceil) y=-this.ceil;
+      o[i]=y;
+      this.p=(p+1)%D;
+    }
+    for(let c=1;c<out.length;c++) out[c].set(o);
+    return true;
+  }
+}
+registerProcessor('earshot-limiter', EarshotLimiter);
 
 /* ─── Capture ──────────────────────────────────────────────────────────── */
 class EarshotCapture extends AudioWorkletProcessor {
