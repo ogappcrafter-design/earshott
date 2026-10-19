@@ -17,7 +17,6 @@ import { SpyPanel } from '../ui/SpyPanel';
 
 export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
   const s = useStore();
-  const [elapsed, setElapsed] = useState(0);
   const [askHeadphones, setAskHeadphones] = useState(false);
   const [stealth, setStealth] = useState(false);
   const e = s.settings.engine;
@@ -62,12 +61,6 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
     await saveVoice({id:newId(),name:name.trim(),lowHz:src.lowHz,medianHz:src.medianHz,highHz:src.highHz,createdAt:Date.now(),colorHue:src.hue});
     await s.refresh(); setNaming(null); toast(`${name.trim()} saved to Voices`);
   };
-
-  useEffect(()=>{
-    if(!s.recordStartedAt){setElapsed(0);return;}
-    const id=setInterval(()=>setElapsed((Date.now()-s.recordStartedAt!)/1000),250);
-    return ()=>clearInterval(id);
-  },[s.recordStartedAt]);
 
   const monitor = () => {
     if(s.settings.silentMode){ toast('Silent mode is on. Flip the switch to Listen to hear out loud.','ok'); return; }
@@ -229,12 +222,14 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
         </div>
       )}
 
+      {s.recording&&s.audioStalled&&<p className="banner banner--err" role="status">Android paused the mic. Keep the screen on, or reopen the app to carry on. Nothing before this is lost.</p>}
+
       {/* Recording bar */}
       <div className="rec-bar">
         <button type="button" className={`rec-btn${s.recording?' is-rec':''}`} onClick={record}
           aria-label={s.recording?'Stop recording':'Start recording'}><span /></button>
         <div className="rec-bar__info">
-          <strong>{s.recording?formatTime(elapsed):'●'}</strong>
+          <strong>{s.recording?formatTime(s.capturedSec):'●'}</strong>
           <small>{s.recording?`◆ ${s.bookmarks.length}`:`${s.settings.bitDepth}-bit`}</small>
         </div>
         {s.recording&&(
@@ -301,7 +296,7 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
             const r=await s.stopRecording();
             if(r) toast(`Stealth recording saved (${formatTime(r.durationSec)})`,'ok');
           }
-        }} recording={s.recording} recordStartedAt={s.recordStartedAt} />
+        }} recording={s.recording} capturedSec={s.capturedSec} />
       )}
 
       <Confirm open={askHeadphones} title="Listen out loud?"
@@ -315,12 +310,12 @@ export function Listen({ toast }: { toast: (t:string, k?:'ok'|'err')=>void }) {
 /* ── Stealth overlay (inline — minimal deps) ───────────────────────────── */
 import { useCallback, useRef } from 'react';
 
-function StealthOverlay({ onExit, recording, recordStartedAt }: {
+function StealthOverlay({ onExit, recording, capturedSec }: {
   onExit: ()=>Promise<void>;
   recording: boolean;
-  recordStartedAt: number | null;
+  capturedSec: number;
 }) {
-  const [elapsed, setElapsed] = useState(0);
+  const elapsed = capturedSec;
   const [taps, setTaps] = useState(0);
   const [hint, setHint] = useState(false);
   const tapTimeout = useRef<ReturnType<typeof setTimeout>|null>(null);
@@ -338,12 +333,6 @@ function StealthOverlay({ onExit, recording, recordStartedAt }: {
     acquire();
     return ()=>{ (wakeLock.current as any)?.release?.().catch(()=>undefined); };
   },[]);
-
-  useEffect(()=>{
-    if(!recordStartedAt){setElapsed(0);return;}
-    const id=setInterval(()=>setElapsed((Date.now()-recordStartedAt)/1000),1000);
-    return()=>clearInterval(id);
-  },[recordStartedAt]);
 
   const handleTap = useCallback(()=>{
     if(exiting.current) return;

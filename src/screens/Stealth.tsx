@@ -8,7 +8,7 @@ interface StealthProps {
 
 export function Stealth({ onExit }: StealthProps) {
   const s = useStore();
-  const [elapsed, setElapsed] = useState(0);
+  const elapsed = s.capturedSec;
   const [visible, setVisible] = useState(false);
   const [exitCount, setExitCount] = useState(0);
   const [exitHint, setExitHint] = useState(false);
@@ -35,12 +35,6 @@ export function Stealth({ onExit }: StealthProps) {
     setVisible(true);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Elapsed timer
-  useEffect(() => {
-    if (!s.recordStartedAt) { setElapsed(0); return; }
-    const id = setInterval(() => setElapsed((Date.now() - s.recordStartedAt!) / 1000), 1000);
-    return () => clearInterval(id);
-  }, [s.recordStartedAt]);
 
   // Triple-tap to exit stealth
   const handleTap = useCallback(() => {

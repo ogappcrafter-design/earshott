@@ -107,6 +107,9 @@ export class AudioEngine {
   } | null = null;
   private settings: EngineSettings = { ...DEFAULT_ENGINE_SETTINGS };
   private chunks: Float32Array[] = [];
+  /** Audio frames actually delivered while recording. The truth about how long the recording is. */
+  capturedFrames = 0;
+  private wake: { release: () => Promise<void> } | null = null;
   private deviceNsActive: boolean | null = null;
   private demoSource: AudioBufferSourceNode | null = null;
   private ghostResolve: ((data: Float32Array)=>void) | null = null;
@@ -157,7 +160,20 @@ export class AudioEngine {
     this.build(ctx.createMediaStreamSource(this.stream));
     this.apply();
     this.stream.getAudioTracks()[0]?.addEventListener('ended',()=>this.stop());
+    ctx.onstatechange = () => { if (this.recording) this.nudge(); };
   }
+
+  /** Android pauses web audio when the screen sleeps or the app is hidden: wake it back up and keep the screen on. */
+  nudge(){
+    const c=this.ctx;
+    if(c && String(c.state)!=='running' && c.state!=='closed') c.resume().catch(()=>undefined);
+    if(this.recording && !this.wake && !document.hidden) void this.holdAwake();
+  }
+  private async holdAwake(){
+    try{ const wl=(navigator as unknown as {wakeLock?:{request:(t:'screen')=>Promise<{release:()=>Promise<void>}>}}).wakeLock;
+      if(wl) this.wake=await wl.request('screen'); }catch{ /* not allowed: fine */ }
+  }
+  private releaseAwake(){ try{ void this.wake?.release(); }catch{ /* ignore */ } this.wake=null; }
 
   private constraints(ns: boolean): MediaTrackConstraints {
     // Always disable device-level AGC/echo cancel for cleanest spy-grade input
@@ -243,7 +259,7 @@ export class AudioEngine {
     capture.node.connect(captureSink); captureSink.connect(ctx.destination);
     brick.connect(analyser);
     if(ghost) brick.connect(ghost);
-    capture.onChunk((c)=>this.chunks.push(c));
+    capture.onChunk((c)=>{ this.chunks.push(c); this.capturedFrames+=c.length; });
 
     this.nodes = {source,spectral,humLo,humHi,rumble,focusLow,focusFund,focusPresence,focusAir,focus2Fund,focus2Presence,howl,leveler,hiss,eq,mutes,raw,gate,amp,limiter,pan,monitor,capture,analyser,ghost};
   }
@@ -419,12 +435,12 @@ export class AudioEngine {
 
   startRecording(){
     if(!this.nodes||this.recording) return;
-    this.chunks=[]; this.recording=true; this.nodes.capture.start();
+    this.chunks=[]; this.capturedFrames=0; this.recording=true; this.nodes.capture.start(); this.nudge();
   }
 
   async stopRecording(): Promise<Float32Array>{
     if(!this.nodes||!this.recording) return new Float32Array(0);
-    this.recording=false;
+    this.recording=false; this.releaseAwake();
     await this.nodes.capture.stop();
     const out=concatChunks(this.chunks); this.chunks=[]; return out;
   }

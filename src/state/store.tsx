@@ -21,6 +21,10 @@ export interface Store {
   monitoring: boolean;
   recording: boolean;
   recordStartedAt: number | null;
+  /** Seconds of audio really captured so far (not wall-clock time). */
+  capturedSec: number;
+  /** True when Android has paused the microphone mid-recording. */
+  audioStalled: boolean;
   bookmarks: number[];
   error: string | null;
   startLive: () => Promise<boolean>;
@@ -53,6 +57,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [monitoring, setMonitoring] = useState(false);
   const [recording, setRecording] = useState(false);
   const [recordStartedAt, setRecordStartedAt] = useState<number|null>(null);
+  const [capturedSec, setCapturedSec] = useState(0);
+  const [audioStalled, setAudioStalled] = useState(false);
   const [bookmarks, setBookmarks] = useState<number[]>([]);
   const [error, setError] = useState<string|null>(null);
   const [recordings, setRecordings] = useState<Recording[]>([]);
@@ -358,8 +364,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return ()=>document.removeEventListener('visibilitychange',onHide);
   },[engine]);
 
+  // Watch the microphone itself: show captured time, and wake it up if Android paused it
+  useEffect(()=>{
+    if(!recording){setCapturedSec(0);setAudioStalled(false);return;}
+    let last=engine.capturedFrames, lastAt=Date.now();
+    const t=setInterval(()=>{
+      const f=engine.capturedFrames; setCapturedSec(f/engine.sampleRate);
+      if(f!==last){last=f;lastAt=Date.now();setAudioStalled(false);}
+      else if(Date.now()-lastAt>2500){setAudioStalled(true);engine.nudge();}
+    },500);
+    const onVis=()=>{ if(!document.hidden) engine.nudge(); };
+    document.addEventListener('visibilitychange',onVis);
+    return ()=>{clearInterval(t);document.removeEventListener('visibilitychange',onVis);};
+  },[recording,engine]);
+
   const value: Store = {
-    settings,setSettings,setEngine,engine,live,monitoring,recording,recordStartedAt,bookmarks,error,
+    settings,setSettings,setEngine,engine,live,monitoring,recording,recordStartedAt,capturedSec,audioStalled,bookmarks,error,
     startLive,stopLive,toggleMonitor,startRecording,stopRecording,addBookmark,
     saveGhostRecording,ghostAvailSec,vadActive,
     recordings,voices,refresh,downloadProgress,activeVoice,usingTestSignal,setTestSignal,notice,
