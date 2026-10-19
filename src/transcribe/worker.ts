@@ -53,7 +53,7 @@ self.onmessage = async (e: MessageEvent<Req>) => {
     const out = (await asr(prep.audio, {
       chunk_length_s: 30,
       stride_length_s: 4,
-      batch_size: 4,
+      batch_size: 1,
       no_repeat_ngram_size: 4,
       return_timestamps: true,
       ...(isEnglishOnly ? {} : { task: 'transcribe', language: language ?? undefined }),

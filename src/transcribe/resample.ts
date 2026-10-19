@@ -45,3 +45,44 @@ export async function decodeWavBlob(blob: Blob): Promise<{ samples: Float32Array
   }
   return { samples: out, sampleRate };
 }
+
+export interface WavInfo { numCh: number; sampleRate: number; bits: number; dataOff: number; frames: number }
+
+/** Reads just the header, so a long recording never has to be loaded whole. */
+export async function wavInfo(blob: Blob): Promise<WavInfo> {
+  const buf = await blob.slice(0, 65536).arrayBuffer();
+  const v = new DataView(buf);
+  if (buf.byteLength < 44) throw new Error('This file has no audio data.');
+  const numCh = v.getUint16(22, true), sampleRate = v.getUint32(24, true), bits = v.getUint16(34, true);
+  let off = 12, dataOff = -1, dataLen = 0;
+  while (off + 8 <= buf.byteLength) {
+    const id = String.fromCharCode(v.getUint8(off), v.getUint8(off + 1), v.getUint8(off + 2), v.getUint8(off + 3));
+    const size = v.getUint32(off + 4, true);
+    if (id === 'data') { dataOff = off + 8; dataLen = size; break; }
+    off += 8 + size + (size % 2);
+  }
+  if (dataOff < 0) throw new Error('This file has no audio data.');
+  const blockAlign = (bits / 8) * numCh;
+  const frames = Math.floor(Math.min(dataLen, Math.max(0, blob.size - dataOff)) / blockAlign);
+  return { numCh, sampleRate, bits, dataOff, frames };
+}
+
+/** Decodes only frames [from, to) to mono floats. */
+export async function decodeWavRange(blob: Blob, info: WavInfo, from: number, to: number): Promise<Float32Array> {
+  const bps = info.bits / 8, ba = bps * info.numCh;
+  const a = Math.max(0, Math.min(info.frames, from)), b = Math.max(a, Math.min(info.frames, to));
+  const buf = await blob.slice(info.dataOff + a * ba, info.dataOff + b * ba).arrayBuffer();
+  const v = new DataView(buf);
+  const frames = Math.floor(buf.byteLength / ba);
+  const out = new Float32Array(frames);
+  for (let i = 0; i < frames; i++) {
+    let s = 0;
+    for (let c = 0; c < info.numCh; c++) {
+      const p = (i * info.numCh + c) * bps;
+      if (info.bits === 16) s += v.getInt16(p, true) / 0x8000;
+      else { let x = v.getUint8(p) | (v.getUint8(p + 1) << 8) | (v.getUint8(p + 2) << 16); if (x & 0x800000) x |= ~0xffffff; s += x / 0x800000; }
+    }
+    out[i] = s / info.numCh;
+  }
+  return out;
+}
