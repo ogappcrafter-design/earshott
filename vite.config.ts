@@ -20,7 +20,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: tester ? [react(), testerQueue(), viteSingleFile()] : [react()],
     base: './',
-    define: tester ? { 'import.meta.env.VITE_TESTER': JSON.stringify('1') } : {},
+    define: { __BUILD__: JSON.stringify((process.env.VERCEL_GIT_COMMIT_SHA || process.env.GITHUB_SHA || 'dev').slice(0, 7)), ...(tester ? { 'import.meta.env.VITE_TESTER': JSON.stringify('1') } : {}) },
     worker: { format: 'es' },
     build: tester
       ? { target: 'es2022', outDir: 'dist-tester', assetsInlineLimit: 100_000_000, cssCodeSplit: false }

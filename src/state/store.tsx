@@ -11,6 +11,7 @@ import { loadSettings, saveSettings, type AppSettings } from './settings';
 import { setSfxEnabled } from '../ui/sfx';
 import { IS_TESTER } from '../demo';
 import { VAD } from '../audio/vad';
+import { setCrumbSource } from '../storage/report';
 
 export interface Store {
   settings: AppSettings;
@@ -363,6 +364,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     document.addEventListener('visibilitychange',onHide);
     return ()=>document.removeEventListener('visibilitychange',onHide);
   },[engine]);
+
+  // What the app is doing right now, for crash reports
+  const crumbRef = useRef<Record<string, unknown>>({});
+  const tStatus = useRef<string>('idle');
+  useEffect(()=>onTranscribe((e)=>{ tStatus.current = e.type==='status' ? `${e.status} ${e.progress ?? ''}%` : e.type==='download' ? `download ${Math.round(e.progress)}%` : e.type; }),[]);
+  crumbRef.current = { live, recording, capturedSec: Math.round(capturedSec), stalled: audioStalled, monitoring,
+    legacyAudio: engine.legacy, ctx: engine.contextState, recordings: recordings.length, model: settings.transcribeModel, transcribe: tStatus.current,
+    silent: settings.silentMode, volumeDb: settings.engine?.volumeDb };
+  useEffect(()=>{ setCrumbSource(()=>({ ...crumbRef.current, transcribe: tStatus.current })); },[]);
 
   // Watch the microphone itself: show captured time, and wake it up if Android paused it
   useEffect(()=>{

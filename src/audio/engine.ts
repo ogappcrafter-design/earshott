@@ -122,6 +122,7 @@ export class AudioEngine {
   recording = false;
 
   get running() { return this.ctx!==null && this.ctx.state!=='closed'; }
+  get contextState() { return this.ctx ? String(this.ctx.state) : 'none'; }
   get sampleRate() { return this.ctx?.sampleRate ?? 48000; }
   get analyser() { return this.nodes?.analyser ?? null; }
   get rawAnalyser() { return this.nodes?.raw ?? null; }
