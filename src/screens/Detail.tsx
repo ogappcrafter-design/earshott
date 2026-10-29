@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { deleteRecording, patchRecording } from '../storage/db';
+import { deleteRecording, getRecordingAudio, patchRecording } from '../storage/db';
 import { audioFileName, saveToDevice, shareFile, transcriptFileName, transcriptToText } from '../storage/export';
 import { enqueueTranscription } from '../transcribe/queue';
 import { useStore } from '../state/store';
@@ -18,8 +18,16 @@ export function Detail({ id, onBack, toast }: { id: string; onBack: () => void; 
   const [title, setTitle] = useState(rec?.title ?? '');
   const [confirmDel, setConfirmDel] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const url = useMemo(() => (rec ? URL.createObjectURL(rec.audio) : ''), [rec?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Audio loads only for the recording you open, never for the whole archive
+  const [blob, setBlob] = useState<Blob | null>(null);
+  useEffect(() => {
+    let alive = true; setBlob(null);
+    getRecordingAudio(id).then((b) => { if (alive) setBlob(b); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, [id]);
+  const url = useMemo(() => (blob ? URL.createObjectURL(blob) : ''), [blob]);
   useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  const needAudio = async () => { const b = blob ?? await getRecordingAudio(id); if (!b) throw new Error('This recording\'s audio is missing.'); return b; };
   useEffect(() => { if (rec) setTitle(rec.title); }, [rec?.title]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!rec) return (
@@ -69,9 +77,9 @@ export function Detail({ id, onBack, toast }: { id: string; onBack: () => void; 
 
       <div className="action-row">
         <Button variant="ghost" icon={<IconShare />} busy={busy === 'share'}
-          onClick={() => run('share', () => shareFile(rec.audio, audioFileName(rec), rec.title))}>Share audio</Button>
+          onClick={() => run('share', async () => shareFile(await needAudio(), audioFileName(rec), rec.title))}>Share audio</Button>
         <Button variant="ghost" icon={<IconSave />} busy={busy === 'save'}
-          onClick={() => run('save', () => saveToDevice(rec.audio, audioFileName(rec)), 'Saved to')}>Save to phone</Button>
+          onClick={() => run('save', async () => saveToDevice(await needAudio(), audioFileName(rec)), 'Saved to')}>Save to phone</Button>
       </div>
 
       <section className="transcript">

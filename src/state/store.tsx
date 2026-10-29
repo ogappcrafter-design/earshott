@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AudioEngine, EngineStartError, type EngineSettings } from '../audio/engine';
 import { encodeWav } from '../audio/wav';
-import { defaultTitle, logError, patchRecording, listRecordings, listVoices, newId, saveRecording, spoolAppend, spoolClear, spoolPieces, spoolSessions, requestPersistentStorage, type Recording, type VoiceProfile } from '../storage/db';
+import { defaultTitle, logError, patchRecording, listRecordings, listVoices, newId, saveRecording, spoolAppend, spoolClear, spoolPieces, spoolSessions, requestPersistentStorage, type Recording, type RecordingMeta, type VoiceProfile } from '../storage/db';
 import { concatChunks, pcmBytes, wavHeader } from '../audio/wav';
 import { importBackgroundRecordings, isNative, onBackgroundState, startBackground } from '../native/background';
 import { App as CapApp } from '@capacitor/app';
@@ -37,7 +37,7 @@ export interface Store {
   saveGhostRecording: () => Promise<Recording|null>;
   ghostAvailSec: number;
   vadActive: boolean;
-  recordings: Recording[];
+  recordings: RecordingMeta[];
   voices: VoiceProfile[];
   refresh: () => Promise<void>;
   downloadProgress: number | null;
@@ -62,7 +62,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [audioStalled, setAudioStalled] = useState(false);
   const [bookmarks, setBookmarks] = useState<number[]>([]);
   const [error, setError] = useState<string|null>(null);
-  const [recordings, setRecordings] = useState<Recording[]>([]);
+  const [recordings, setRecordings] = useState<RecordingMeta[]>([]);
   const [voices, setVoices] = useState<VoiceProfile[]>([]);
   const [downloadProgress, setDownloadProgress] = useState<number|null>(null);
   const [usingTestSignal, setUsingTestSignal] = useState(false);

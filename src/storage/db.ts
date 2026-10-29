@@ -37,12 +37,17 @@ interface EarshotDB extends DBSchema {
   recordings: { key: string; value: Recording; indexes: { byDate: number } };
   voices: { key: string; value: VoiceProfile };
   spool: { key: number; value: SpoolPiece; indexes: { bySession: string } };
+  /** Audio lives apart from the list, so showing the archive never loads every recording into memory. */
+  audio: { key: string; value: Uint8Array };
 }
+
+/** Everything about a recording except the sound itself. Cheap to list. */
+export type RecordingMeta = Omit<Recording, 'audio'>;
 
 let dbPromise: Promise<IDBPDatabase<EarshotDB>> | null = null;
 export function db() {
   if (!dbPromise) {
-    dbPromise = openDB<EarshotDB>('earshot', 2, {
+    dbPromise = openDB<EarshotDB>('earshot', 3, {
       upgrade(d, old) {
         if (old < 1) {
           const r = d.createObjectStore('recordings', { keyPath: 'id' });
@@ -53,6 +58,7 @@ export function db() {
           const sp = d.createObjectStore('spool', { keyPath: 'key', autoIncrement: true });
           sp.createIndex('bySession', 'session');
         }
+        if (old < 3) d.createObjectStore('audio');
       },
     });
   }
@@ -63,27 +69,87 @@ export function resetDbHandleForTests() { dbPromise = null; }
 export const newId = () =>
   (globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`);
 
-export async function listRecordings(): Promise<Recording[]> {
-  const all = await (await db()).getAllFromIndex('recordings', 'byDate');
-  return all.reverse().map((r) => hydrate(r)!) ;
+const toBytes = async (a: unknown): Promise<Uint8Array> =>
+  a instanceof Blob ? new Uint8Array(await a.arrayBuffer()) : a instanceof Uint8Array ? a : new Uint8Array(a as ArrayBuffer);
+
+/**
+ * Lists recordings WITHOUT their audio. Older versions kept the audio inside each row; those rows are moved
+ * over one at a time (each in its own small transaction) so even a huge archive never has to fit in memory.
+ */
+export async function listRecordings(): Promise<RecordingMeta[]> {
+  const d = await db();
+  const out: RecordingMeta[] = [];
+  // If the app ever dies while reading one row, that row is skipped from then on (kept on disk, never deleted)
+  const ls = globalThis.localStorage;
+  let skip: string[] = [];
+  try {
+    skip = JSON.parse(ls?.getItem('earshot.skipRows') || '[]');
+    const was = ls?.getItem('earshot.readingRow');
+    if (was && !skip.includes(was)) { skip.push(was); ls?.setItem('earshot.skipRows', JSON.stringify(skip)); logError('archive', `skipped a recording that crashed the app while loading (${was})`); }
+  } catch { /* storage blocked */ }
+  // Once every old row has been moved, rows are tiny and there's nothing left to guard
+  const moved = ls?.getItem('earshot.audioSplit') === '1';
+  let sawAudio = false;
+  for (const key of await d.getAllKeys('recordings')) {
+    if (skip.includes(String(key))) continue;
+    if (!moved) try { ls?.setItem('earshot.readingRow', String(key)); } catch { /* ignore */ }
+    const row = await d.get('recordings', key) as (Recording & { audio?: unknown }) | undefined;
+    if (!row) continue;
+    if (row.audio != null) {
+      sawAudio = true;
+      const bytes = await toBytes(row.audio);
+      const tx = d.transaction(['recordings', 'audio'], 'readwrite');
+      const { audio: _a, ...meta } = row; void _a;
+      await tx.objectStore('audio').put(bytes, row.id);
+      await tx.objectStore('recordings').put(meta as unknown as Recording);
+      await tx.done;
+      out.push(meta);
+    } else {
+      out.push(row);
+    }
+  }
+  try { ls?.removeItem('earshot.readingRow'); if (!sawAudio) ls?.setItem('earshot.audioSplit', '1'); } catch { /* ignore */ }
+  return out.sort((x, y) => y.createdAt - x.createdAt);
 }
-export async function getRecording(id: string) { return hydrate(await (await db()).get('recordings', id)); }
-function hydrate(r: Recording | undefined): Recording | undefined {
-  if (r && !(r.audio instanceof Blob)) r.audio = new Blob([r.audio as unknown as BlobPart], { type: 'audio/wav' });
-  return r;
+
+/** Loads one recording's audio only when it's actually needed (play, share, send, transcribe). */
+export async function getRecordingAudio(id: string): Promise<Blob | null> {
+  const d = await db();
+  const bytes = await d.get('audio', id);
+  if (bytes) return new Blob([bytes as BlobPart], { type: 'audio/wav' });
+  const row = await d.get('recordings', id) as (Recording & { audio?: unknown }) | undefined;
+  if (row?.audio != null) return new Blob([await toBytes(row.audio) as BlobPart], { type: 'audio/wav' });
+  return null;
 }
+
+/** One full recording, audio included. */
+export async function getRecording(id: string): Promise<Recording | undefined> {
+  const row = await (await db()).get('recordings', id);
+  if (!row) return undefined;
+  const audio = await getRecordingAudio(id);
+  if (!audio) return undefined;
+  return { ...row, audio };
+}
+
 export async function saveRecording(r: Recording) {
   const d = await db();
-  // Some Android WebViews choke on storing Blobs: keep audio as bytes on disk.
-  const bytes = r.audio instanceof Blob ? new Uint8Array(await r.audio.arrayBuffer()) : r.audio;
-  const row = { ...r, audio: bytes } as unknown as Recording;
-  await d.put('recordings', row);
+  const bytes = await toBytes(r.audio);
+  const { audio: _a, ...meta } = r; void _a;
+  const tx = d.transaction(['recordings', 'audio'], 'readwrite');
+  await tx.objectStore('audio').put(bytes, r.id);
+  await tx.objectStore('recordings').put(meta as unknown as Recording);
+  await tx.done;
   // Verify it actually landed; throw loudly if not so the UI can tell the user.
-  const check = await d.get('recordings', r.id);
-  if (!check) throw new Error('The recording did not save to storage.');
+  const check = await d.get('audio', r.id);
+  if (!check || check.byteLength !== bytes.byteLength) throw new Error('The recording did not save to storage.');
 }
-export async function deleteRecording(id: string) { await (await db()).delete('recordings', id); }
-export async function patchRecording(id: string, patch: Partial<Recording>) {
+export async function deleteRecording(id: string) {
+  const tx = (await db()).transaction(['recordings', 'audio'], 'readwrite');
+  await tx.objectStore('recordings').delete(id);
+  await tx.objectStore('audio').delete(id);
+  await tx.done;
+}
+export async function patchRecording(id: string, patch: Partial<RecordingMeta>) {
   const d = await db();
   const tx = d.transaction('recordings', 'readwrite');
   const cur = await tx.store.get(id);
@@ -97,7 +163,7 @@ export async function listVoices(): Promise<VoiceProfile[]> {
 export async function saveVoice(v: VoiceProfile) { await (await db()).put('voices', v); }
 export async function deleteVoice(id: string) { await (await db()).delete('voices', id); }
 
-export function searchRecordings(list: Recording[], q: string): Recording[] {
+export function searchRecordings<T extends RecordingMeta>(list: T[], q: string): T[] {
   const needle = q.trim().toLowerCase();
   if (!needle) return list;
   return list.filter((r) => r.title.toLowerCase().includes(needle) || (r.transcript?.text ?? '').toLowerCase().includes(needle));
@@ -115,8 +181,11 @@ export async function spoolPieces(session: string): Promise<SpoolPiece[]> {
   return ((await (await db()).getAllFromIndex('spool', 'bySession', session)) as SpoolPiece[]).sort((a, b) => a.seq - b.seq);
 }
 export async function spoolSessions(): Promise<string[]> {
-  const all = (await (await db()).getAll('spool')) as SpoolPiece[];
-  return [...new Set(all.map((p) => p.session))];
+  // Walk the index keys only: never pulls the audio pieces into memory
+  const sessions: string[] = [];
+  let cur = await (await db()).transaction('spool').store.index('bySession').openKeyCursor(null, 'nextunique');
+  while (cur) { sessions.push(cur.key as string); cur = await cur.continue(); }
+  return sessions;
 }
 export async function spoolClear(session: string) {
   const d = await db(); const tx = d.transaction('spool', 'readwrite');

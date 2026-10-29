@@ -1,7 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { Share } from '@capacitor/share';
-import type { Recording } from './db';
+import type { RecordingMeta } from './db';
 import { formatTime } from '../ui/format';
 import { IS_TESTER } from '../demo';
 import { zipFiles } from './zip';
@@ -34,7 +34,7 @@ async function blobToBase64(b: Blob): Promise<string> {
   return btoa(bin);
 }
 
-export function transcriptToText(r: Recording): string {
+export function transcriptToText(r: RecordingMeta): string {
   if (!r.transcript) return '';
   const lines = r.transcript.chunks.length
     ? r.transcript.chunks.map((c) => `[${formatTime(c.start)}] ${c.text.trim()}`)
@@ -65,5 +65,5 @@ export async function shareFile(blob: Blob, fileName: string, title: string) {
   await Share.share({ title, url: res.uri, dialogTitle: title });
 }
 
-export const audioFileName = (r: Recording) => `${safeFileName(r.title)}.wav`;
-export const transcriptFileName = (r: Recording) => `${safeFileName(r.title)} transcript.txt`;
+export const audioFileName = (r: RecordingMeta) => `${safeFileName(r.title)}.wav`;
+export const transcriptFileName = (r: RecordingMeta) => `${safeFileName(r.title)} transcript.txt`;

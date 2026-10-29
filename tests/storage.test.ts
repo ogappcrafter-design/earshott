@@ -49,3 +49,24 @@ describe('format helpers', () => {
     expect(safeFileName('a/b:c*?  d')).toBe('abc d'); expect(safeFileName('///')).toBe('Earshot recording');
   });
 });
+
+describe('archive keeps audio out of the list', () => {
+  it('moves old rows that held audio, keeps every byte, and lists without audio', async () => {
+    const { db, getRecordingAudio } = await import('../src/storage/db');
+    const bytes = Uint8Array.from({ length: 5000 }, (_, i) => i % 251);
+    // An old-style row: audio stored inside the recording itself
+    await (await db()).put('recordings', { ...rec('old', 50), audio: bytes } as unknown as Recording);
+    const list = await listRecordings();
+    const old = list.find((r) => r.id === 'old')!;
+    expect(old).toBeTruthy();
+    expect('audio' in old).toBe(false);
+    const raw = await (await db()).get('recordings', 'old') as unknown as Record<string, unknown>;
+    expect(raw.audio).toBeUndefined();
+    const back = new Uint8Array(await (await getRecordingAudio('old'))!.arrayBuffer());
+    expect(back.length).toBe(5000);
+    expect(back[250]).toBe(250);
+    expect((await getRecording('old'))!.audio.size).toBe(5000);
+    await deleteRecording('old');
+    expect(await getRecordingAudio('old')).toBeNull();
+  });
+});
