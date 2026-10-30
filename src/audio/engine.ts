@@ -107,6 +107,8 @@ export class AudioEngine {
   } | null = null;
   private settings: EngineSettings = { ...DEFAULT_ENGINE_SETTINGS };
   private chunks: Float32Array[] = [];
+  private duck: GainNode|null = null;
+  private duckDb = 0;
   /** Audio frames actually delivered while recording. The truth about how long the recording is. */
   capturedFrames = 0;
   private wake: { release: () => Promise<void> } | null = null;
@@ -197,7 +199,11 @@ export class AudioEngine {
     const humLo = biquad('notch',50,30);  // will be tuned in apply()
     const humHi = biquad('notch',100,20);
     // Voice focus chain
-    const rumble = biquad('highpass',70);
+    // Rumble + mud: speech lives above ~150 Hz. Two stacked high-passes (24 dB/oct at 120 Hz) plus a gentle
+    // low-mid dip stop handling noise, traffic, fans and room boom from swamping the voice once it's amplified.
+    const rumble = biquad('highpass',120,0.6);
+    const rumble2 = biquad('highpass',120,0.9);
+    const mud = biquad('lowshelf',240); mud.gain.value=-5;
     const focusLow = biquad('lowshelf',150);
     const focusFund = biquad('peaking',180,1.2);
     const focusPresence = biquad('peaking',2800,0.9);
@@ -250,10 +256,12 @@ export class AudioEngine {
     const firstNode = spectral ?? humLo;
     source.connect(firstNode);
     if (spectral){spectral.connect(humLo);}
-    const chain: AudioNode[] = [humLo,humHi,rumble,focusLow,focusFund,focusPresence,focusAir,focus2Fund,focus2Presence,...eq,...mutes,...howl,gate.node,leveler,hiss,amp,limiter,brick];
+    const chain: AudioNode[] = [humLo,humHi,rumble,rumble2,mud,focusLow,focusFund,focusPresence,focusAir,focus2Fund,focus2Presence,...eq,...mutes,...howl,gate.node,leveler,hiss,amp,limiter,brick];
     for(let i=0;i<chain.length-1;i++) chain[i].connect(chain[i+1]);
     brick.connect(pan);
-    pan.connect(monitor); monitor.connect(ctx.destination);
+    // Feedback brake: only the speaker path is turned down when a howl starts, the recording is untouched
+    const duck = ctx.createGain(); duck.gain.value=1; this.duck=duck;
+    pan.connect(duck); duck.connect(monitor); monitor.connect(ctx.destination);
     brick.connect(capture.node);
     // Keep the capture worklet in the running graph even when nothing plays out loud:
     const captureSink = ctx.createGain(); captureSink.gain.value=0;
@@ -397,26 +405,34 @@ export class AudioEngine {
     if(this.howlTimer) return;
     const bins = new Float32Array(this.nodes!.analyser.frequencyBinCount);
     const seen = new Map<number,number>();
+    let lastHowl = 0;
     this.howlTimer = setInterval(()=>{
       const n=this.nodes, ctx=this.ctx; if(!n||!ctx) return;
-      // Only worth checking when sound is leaving the speaker loud enough to loop back
-      if(!this.monitoring || this.settings.volumeDb < 18){ seen.clear(); return; }
+      // Feedback only exists when sound leaves the speaker
+      if(!this.monitoring || this.silent){ seen.clear(); this.setDuck(0); return; }
       n.analyser.getFloatFrequencyData(bins);
       const hzPer = ctx.sampleRate / n.analyser.fftSize;
-      const lo = Math.floor(150/hzPer), hi = Math.min(bins.length-9, Math.floor(9000/hzPer));
+      const lo = Math.floor(120/hzPer), hi = Math.min(bins.length-9, Math.floor(10000/hzPer));
       const hot = new Set<number>();
       for(let b=lo;b<hi;b++){
-        const v=bins[b]; if(v < -38) continue;
+        const v=bins[b]; if(v < -48) continue;
         let around=0; for(let k=4;k<=8;k++) around+=bins[b-k]+bins[b+k]; around/=10;
-        if(v-around>22 && v>=bins[b-1] && v>=bins[b+1]) hot.add(b);
+        if(v-around>16 && v>=bins[b-1] && v>=bins[b+1]) hot.add(b);
       }
       for(const b of [...seen.keys()]) if(!hot.has(b)) seen.delete(b);
       for(const b of hot){
         const c=(seen.get(b)??0)+1; seen.set(b,c);
-        // A voice wobbles; feedback sits dead still. 4 hits ≈ 0.4 s of a frozen tone.
-        if(c===4) this.placeHowlNotch(b*hzPer);
+        // A voice wobbles; feedback sits dead still. 3 hits ≈ 0.15 s of a frozen tone: notch it AND back the speaker off.
+        if(c===3){ this.placeHowlNotch(b*hzPer); this.setDuck(Math.min(18, this.duckDb+6)); lastHowl=Date.now(); }
       }
-    },100);
+      // Quiet again: bring the speaker back up slowly (about 1 dB a second)
+      if(this.duckDb>0 && Date.now()-lastHowl>1500) this.setDuck(Math.max(0, this.duckDb-0.05));
+    },50);
+  }
+  private setDuck(db:number){
+    if(!this.duck||!this.ctx||db===this.duckDb) return;
+    this.duckDb=db;
+    this.duck.gain.setTargetAtTime(Math.pow(10,-db/20), this.ctx.currentTime, db>0?0.01:0.2);
   }
   private placeHowlNotch(hz:number){
     const n=this.nodes, ctx=this.ctx; if(!n||!ctx) return;
@@ -432,6 +448,7 @@ export class AudioEngine {
     if(this.howlTimer){clearInterval(this.howlTimer);this.howlTimer=null;}
     this.howlSlots=[]; this.feedbackNotches=0;
     this.nodes?.howl.forEach((h)=>{h.gain.value=0;});
+    this.duckDb=0; if(this.duck) this.duck.gain.value=1;
   }
 
   startRecording(){

@@ -176,12 +176,21 @@ public class EarshotService extends Service {
             raf.write(new byte[44]); // header is filled in at the end
             rec.startRecording();
             short[] samples = new short[4096];
+            HighPass hp1 = new HighPass(120, 0.6), hp2 = new HighPass(120, 0.9);
+            double env = 0;
             byte[] out = new byte[samples.length * 2];
             while (keepRecording) {
                 int n = rec.read(samples, 0, samples.length);
                 if (n < 0) break;
                 for (int i = 0; i < n; i++) {
-                    int v = Math.round(samples[i] * GAIN);
+                    // Two stacked 120 Hz high-pass filters take out rumble and boom before the gain
+                    double x = hp1.run(samples[i] / 32768.0);
+                    x = hp2.run(x) * GAIN;
+                    // Soft limiter: turns loud peaks down smoothly instead of clipping them into crackle
+                    double a = Math.abs(x);
+                    env = a > env ? a : env * REL;
+                    double g = env > CEIL ? CEIL / env : 1.0;
+                    int v = (int) Math.round(x * g * 32767.0);
                     if (v > 32767) v = 32767;
                     if (v < -32768) v = -32768;
                     out[2 * i] = (byte) (v & 0xFF);
@@ -253,5 +262,23 @@ public class EarshotService extends Service {
             // ignore
         }
         wakeLock = null;
+    }
+
+    private static final double CEIL = 0.89;
+    private static final double REL = Math.exp(-1.0 / (0.15 * RATE));
+
+    /** RBJ biquad high-pass. */
+    private static final class HighPass {
+        private final double b0, b1, b2, a1, a2;
+        private double x1, x2, y1, y2;
+        HighPass(double f, double q) {
+            double w = 2 * Math.PI * f / RATE, c = Math.cos(w), al = Math.sin(w) / (2 * q), a0 = 1 + al;
+            b0 = (1 + c) / 2 / a0; b1 = -(1 + c) / a0; b2 = (1 + c) / 2 / a0; a1 = -2 * c / a0; a2 = (1 - al) / a0;
+        }
+        double run(double x) {
+            double y = b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2;
+            x2 = x1; x1 = x; y2 = y1; y1 = y;
+            return y;
+        }
     }
 }
