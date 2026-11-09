@@ -11,3 +11,6 @@ export async function enqueueTranscription(id: string, _model: string, _language
 }
 export async function resumePendingTranscriptions(_model: string, _language: string | null) { /* tester build: nothing to resume */ }
 export function setTranscriptionPaused(_on: boolean) { /* tester build: nothing to pause */ }
+
+export function transcriptionCrashCount() { return 0; }
+export function resetTranscriptionCrashes() {}

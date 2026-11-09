@@ -1,10 +1,19 @@
 import { decodeWavRange, resampleLinear, wavInfo } from './resample';
-import { getRecording, listRecordings, patchRecording, type TranscriptChunk } from '../storage/db';
+import { getRecording, listRecordings, logError, patchRecording, type TranscriptChunk } from '../storage/db';
 import { TRANSCRIBE_MODELS, emit, onTranscribe } from './queue.shared';
 export { TRANSCRIBE_MODELS, onTranscribe };
 
 const RATE = 16000;
-const PIECE_SEC = 120;          // work in 2-minute pieces, each saved as soon as it's done
+// Smaller pieces on phones with little memory (or the installed app's WebView, which has a tight limit)
+const lowMem = (() => { const m = (globalThis.navigator as Navigator & { deviceMemory?: number } | undefined)?.deviceMemory; return !m || m <= 4; })();
+const PIECE_SEC = lowMem ? 30 : 90;
+
+/* Crash guard: if the app dies while a piece is being transcribed, that recording is parked
+   (never auto-retried again) and after two such crashes auto-transcription stops until tapped by hand. */
+const INFLIGHT = 'earshot.tx.inflight', CRASHES = 'earshot.tx.crashes';
+const ls = () => { try { return globalThis.localStorage ?? null; } catch { return null; } };
+export function transcriptionCrashCount() { return Number(ls()?.getItem(CRASHES) ?? 0) || 0; }
+export function resetTranscriptionCrashes() { ls()?.removeItem(CRASHES); }
 const STALL_MS = 4 * 60_000;    // no word from the worker for 4 min = stuck, restart it
 
 let worker: Worker | null = null;
@@ -32,8 +41,17 @@ export async function enqueueTranscription(id: string, model: string, language: 
 
 /** On app launch: anything left queued or half-done gets picked back up automatically. */
 export async function resumePendingTranscriptions(model: string, language: string | null) {
+  const store = ls();
+  const died = store?.getItem(INFLIGHT);
+  if (died) {
+    store?.removeItem(INFLIGHT);
+    store?.setItem(CRASHES, String(transcriptionCrashCount() + 1));
+    await patchRecording(died, { transcriptStatus: 'failed', transcriptError: 'Paused: transcribing this one closed the app. Tap Transcribe to try again.' });
+    logError('transcribe', `app died while transcribing ${died}; parked it`);
+  }
+  if (transcriptionCrashCount() >= 2) { logError('transcribe', 'auto-transcribe paused after repeated crashes'); return; }
   for (const r of await listRecordings()) {
-    const retryable = r.transcriptStatus === 'failed' && !/Paused after the app closed|browser preview/.test(r.transcriptError ?? '');
+    const retryable = r.transcriptStatus === 'failed' && !/Paused|browser preview/.test(r.transcriptError ?? '');
     if (r.transcriptStatus === 'queued' || r.transcriptStatus === 'working' || retryable) {
       queue.push({ id: r.id, model: r.transcript?.model ?? model, language });
     }
@@ -99,8 +117,10 @@ async function pump() {
       const end = last ? win.length : quietCut(win, pieceSec * RATE);
       emit({ type: 'status', id: job.id, status: 'transcribing', progress: Math.round((doneSec / total) * 100) });
       let out;
-      try { out = await runPiece(win.slice(0, end), job); }
+      ls()?.setItem(INFLIGHT, job.id);
+      try { out = await runPiece(win.slice(0, end), job); ls()?.removeItem(INFLIGHT); }
       catch (err) {
+        ls()?.removeItem(INFLIGHT);
         const msg = (err as Error).message ?? '';
         if (/Failed to fetch|NetworkError|Load failed|fetch failed|net::/i.test(msg)) throw new Error('The transcription model could not download. Connect to the internet once, then try again.');
         if (++attempts >= 4) throw new Error(/memory|allocat/i.test(msg) ? 'This phone ran out of memory transcribing this part.' : 'Transcription kept stalling on this phone.');

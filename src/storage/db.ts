@@ -174,7 +174,7 @@ export function defaultTitle(d = new Date()) {
 }
 
 /** A piece of an in-progress recording, written to disk every few seconds so a crash can't lose it. */
-export interface SpoolPiece { key?: number; session: string; seq: number; startedAt: number; sampleRate: number; bitDepth: 16 | 24; frames: number; pcm: Blob; bookmarks: number[] }
+export interface SpoolPiece { key?: number; session: string; seq: number; startedAt: number; sampleRate: number; bitDepth: 16 | 24; frames: number; pcm: Blob | ArrayBuffer; bookmarks: number[] }
 
 export async function spoolAppend(p: SpoolPiece) { await (await db()).add('spool', p); }
 export async function spoolPieces(session: string): Promise<SpoolPiece[]> {

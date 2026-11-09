@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { deleteRecording, getRecordingAudio, patchRecording } from '../storage/db';
 import { audioFileName, saveToDevice, shareFile, transcriptFileName, transcriptToText } from '../storage/export';
-import { enqueueTranscription } from '../transcribe/queue';
+import { enqueueTranscription, resetTranscriptionCrashes } from '../transcribe/queue';
 import { useStore } from '../state/store';
 import { Button, Confirm } from '../ui/Controls';
 import { IconBack, IconBookmark, IconPause, IconPlay, IconSave, IconShare, IconText, IconTrash } from '../ui/Icons';
@@ -106,7 +106,7 @@ export function Detail({ id, onBack, toast }: { id: string; onBack: () => void; 
         ) : (
           <>
             {rec.transcriptStatus === 'failed' && <p className={`banner${IS_TESTER ? '' : ' banner--err'}`}>{rec.transcriptError}</p>}
-            {!IS_TESTER && <Button icon={<IconText />} onClick={() => { enqueueTranscription(rec.id, s.settings.transcribeModel, s.settings.language).then(s.refresh); }}>
+            {!IS_TESTER && <Button icon={<IconText />} onClick={() => { resetTranscriptionCrashes(); enqueueTranscription(rec.id, s.settings.transcribeModel, s.settings.language).then(s.refresh); }}>
               {rec.transcriptStatus === 'failed' ? 'Try again' : 'Transcribe'}</Button>}
           </>
         )}

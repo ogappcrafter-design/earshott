@@ -6,7 +6,7 @@ import { concatChunks, pcmBytes, wavHeader } from '../audio/wav';
 import { importBackgroundRecordings, isNative, onBackgroundState, startBackground } from '../native/background';
 import { App as CapApp } from '@capacitor/app';
 import { onBackupChange, queueBackup, resumeBackups } from '../storage/backup';
-import { enqueueTranscription, onTranscribe, resumePendingTranscriptions, setTranscriptionPaused } from '../transcribe/queue';
+import { enqueueTranscription, transcriptionCrashCount, onTranscribe, resumePendingTranscriptions, setTranscriptionPaused } from '../transcribe/queue';
 import { loadSettings, saveSettings, type AppSettings } from './settings';
 import { setSfxEnabled } from '../ui/sfx';
 import { IS_TESTER } from '../demo';
@@ -149,7 +149,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await refresh();
       for(const id of ids){
         const st=settingsRef.current;
-        if(st.autoTranscribe) enqueueTranscription(id,st.transcribeModel,st.language).then(refresh).catch(()=>undefined);
+        if(st.autoTranscribe&&transcriptionCrashCount()<2) enqueueTranscription(id,st.transcribeModel,st.language).then(refresh).catch(()=>undefined);
         else queueBackup(id,backupRef.current);
       }
     };
@@ -234,7 +234,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if(!parts.length) return;
     const samples=concatChunks(parts);
     await spoolAppend({session:sp.session,seq:sp.seq++,startedAt:sp.startedAt,sampleRate:engine.sampleRate,
-      bitDepth:settings.bitDepth,frames:samples.length,pcm:new Blob([pcmBytes(samples,settings.bitDepth)]),bookmarks:bookmarksRef.current});
+      bitDepth:settings.bitDepth,frames:samples.length,pcm:pcmBytes(samples,settings.bitDepth),bookmarks:bookmarksRef.current});
   },[engine,settings.bitDepth]);
   useEffect(()=>{
     if(!recording) return;
@@ -270,7 +270,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       logError('rec:saved',`id=${rec.id} frames=${totalFrames}`);
     }catch(err){logError('stopRecording',err);setError(`Could not save: ${(err as Error).message||'unknown error'}.`);return null;}
     await refresh();
-    if(settings.autoTranscribe) enqueueTranscription(rec.id,settings.transcribeModel,settings.language).then(refresh);
+    if(settings.autoTranscribe&&transcriptionCrashCount()<2) enqueueTranscription(rec.id,settings.transcribeModel,settings.language).then(refresh);
     else queueBackup(rec.id,backupRef.current);
     return rec;
   },[engine,settings,refresh,flushSpool,finalizeSpool]);
@@ -293,7 +293,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     try{await saveRecording(rec);}
     catch{setError('Storage full — could not save.');return null;}
     await refresh();
-    if(settings.autoTranscribe) enqueueTranscription(rec.id,settings.transcribeModel,settings.language).then(refresh);
+    if(settings.autoTranscribe&&transcriptionCrashCount()<2) enqueueTranscription(rec.id,settings.transcribeModel,settings.language).then(refresh);
     else queueBackup(rec.id,backupRef.current);
     return rec;
   },[engine,settings,refresh]);
@@ -344,7 +344,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           };
           try{await saveRecording(rec);}catch{return;}
           await refresh();
-          if(settings.autoTranscribe) enqueueTranscription(rec.id,settings.transcribeModel,settings.language).then(refresh);
+          if(settings.autoTranscribe&&transcriptionCrashCount()<2) enqueueTranscription(rec.id,settings.transcribeModel,settings.language).then(refresh);
         });
       }
     };
