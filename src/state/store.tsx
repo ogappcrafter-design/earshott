@@ -3,7 +3,7 @@ import { AudioEngine, EngineStartError, type EngineSettings } from '../audio/eng
 import { encodeWav } from '../audio/wav';
 import { defaultTitle, logError, patchRecording, listRecordings, listVoices, newId, saveRecording, spoolAppend, spoolClear, spoolPieces, spoolSessions, requestPersistentStorage, type Recording, type RecordingMeta, type VoiceProfile } from '../storage/db';
 import { concatChunks, pcmBytes, wavHeader } from '../audio/wav';
-import { importBackgroundRecordings, isNative, onBackgroundState, startBackground } from '../native/background';
+import { importBackgroundRecordings, isNative, nativeRecord, nativeStatus, nativeStop, onBackgroundState, startBackground } from '../native/background';
 import { App as CapApp } from '@capacitor/app';
 import { onBackupChange, queueBackup, resumeBackups } from '../storage/backup';
 import { enqueueTranscription, transcriptionCrashCount, onTranscribe, resumePendingTranscriptions, setTranscriptionPaused } from '../transcribe/queue';
@@ -57,6 +57,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [live, setLive] = useState(false);
   const [monitoring, setMonitoring] = useState(false);
   const [recording, setRecording] = useState(false);
+  /** When the installed app's background service is recording: the time it started, else null. */
+  const [nativeRec, setNativeRec] = useState<number|null>(null);
+  const nativeRecRef = useRef<number|null>(null); nativeRecRef.current = nativeRec;
+  const [nativeTick, setNativeTick] = useState(0);
+  useEffect(()=>{ if(nativeRec===null) return; const t=setInterval(()=>setNativeTick((n)=>n+1),1000); return ()=>clearInterval(t); },[nativeRec]);
   const [recordStartedAt, setRecordStartedAt] = useState<number|null>(null);
   const [capturedSec, setCapturedSec] = useState(0);
   const [audioStalled, setAudioStalled] = useState(false);
@@ -153,9 +158,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         else queueBackup(id,backupRef.current);
       }
     };
-    startBackground(); pull();
-    const offState=onBackgroundState((rec)=>{ if(!rec) pull(); });
-    const appH=CapApp.addListener('appStateChange',(st)=>{ if(st.isActive){ startBackground(); pull(); } });
+    // Mirror the service's recording state (it may have been started from the notification, or before the app was reopened)
+    const sync=async()=>{ const st=await nativeStatus(); setNativeRec(st.recording?st.startedAt||Date.now():null); };
+    startBackground(); pull(); sync();
+    const offState=onBackgroundState((rec)=>{ if(rec) sync(); else { setNativeRec(null); pull(); } });
+    const appH=CapApp.addListener('appStateChange',(st)=>{ if(st.isActive){ startBackground(); pull(); sync(); } });
     return ()=>{ offState(); appH.then((h)=>h.remove()).catch(()=>undefined); };
   },[refresh]);
   useEffect(()=>{ if(live) startBackground(); },[live]);
@@ -165,7 +172,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Transcript finished (or gave up): ship it
     if(e.type==='done'||e.type==='error') queueBackup(e.id,backupRef.current);
   }),[refresh]);
-  useEffect(()=>{ setTranscriptionPaused(recording); },[recording]);
+  useEffect(()=>{ setTranscriptionPaused(recording||nativeRec!==null); },[recording,nativeRec]);
   useEffect(()=>onBackupChange(()=>{refresh().catch(()=>undefined);}),[refresh]);
   useEffect(()=>{
     resumeBackups(backupCfg).catch(()=>undefined);
@@ -216,7 +223,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   },[engine,startLive]);
 
   const startRecording = useCallback(async()=>{
-    logError('rec:start',`running=${engine.running}`);
+    logError('rec:start',`running=${engine.running} native=${isNative}`);
+    if(isNative){
+      // Installed app: the background service records, so minimizing or locking the phone never stops it
+      const r=await nativeRecord();
+      if(r.ok){ setNativeRec(Date.now()); setBookmarks([]); logError('rec:started','native service'); return; }
+      logError('rec:start',`native failed: ${r.error ?? ''}; recording in-app instead`);
+    }
     if(!engine.running&&!(await startLive())){logError('rec:start','startLive failed');return;}
     const session=newId(), startedAt=Date.now();
     spool.current={session,seq:0,startedAt};
@@ -247,6 +260,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   },[recordStartedAt]);
 
   const stopRecording = useCallback(async()=>{
+    if(nativeRecRef.current!==null){ logError('rec:stop','native service'); await nativeStop(); return null; } // file is imported when the service reports it's done
     const tail=await engine.stopRecording();   // all audio captured since the last disk flush
     logError('rec:stop',`tailFrames=${tail.length}`);
     setRecording(false);setRecordStartedAt(null);
@@ -389,7 +403,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   },[recording,engine]);
 
   const value: Store = {
-    settings,setSettings,setEngine,engine,live,monitoring,recording,recordStartedAt,capturedSec,audioStalled,bookmarks,error,
+    settings,setSettings,setEngine,engine,live,monitoring,recording: recording||nativeRec!==null,
+    recordStartedAt: nativeRec ?? recordStartedAt,
+    capturedSec: nativeRec!==null ? Math.max(0,(Date.now()-nativeRec)/1000)+nativeTick*0 : capturedSec,
+    audioStalled: nativeRec!==null ? false : audioStalled,bookmarks,error,
     startLive,stopLive,toggleMonitor,startRecording,stopRecording,addBookmark,
     saveGhostRecording,ghostAvailSec,vadActive,
     recordings,voices,refresh,downloadProgress,activeVoice,usingTestSignal,setTestSignal,notice,

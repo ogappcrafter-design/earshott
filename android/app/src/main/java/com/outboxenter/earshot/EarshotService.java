@@ -44,7 +44,7 @@ public class EarshotService extends Service {
     private volatile boolean keepRecording = false;
     private Thread worker;
     private PowerManager.WakeLock wakeLock;
-    private long startedAtMs = 0;
+    static volatile long startedAtMs = 0;
 
     @Override
     public IBinder onBind(Intent intent) {

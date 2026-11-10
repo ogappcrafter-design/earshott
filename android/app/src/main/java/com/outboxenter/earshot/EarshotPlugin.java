@@ -105,4 +105,42 @@ public class EarshotPlugin extends Plugin {
         if (f.exists()) f.delete();
         call.resolve();
     }
+
+    /** In-app Record button: the service records, so it keeps going when the app is minimized or the screen locks. */
+    @PluginMethod
+    public void record(PluginCall call) {
+        Context c = getContext();
+        JSObject r = new JSObject();
+        if (ContextCompat.checkSelfPermission(c, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            r.put("ok", false);
+            r.put("error", "Microphone permission is off.");
+            call.resolve(r);
+            return;
+        }
+        try {
+            ContextCompat.startForegroundService(c, new Intent(c, EarshotService.class).setAction(EarshotService.A_REC));
+            r.put("ok", true);
+        } catch (Exception e) {
+            r.put("ok", false);
+            r.put("error", String.valueOf(e.getMessage()));
+        }
+        call.resolve(r);
+    }
+
+    @PluginMethod
+    public void stopRecording(PluginCall call) {
+        Context c = getContext();
+        try {
+            if (EarshotService.recording) c.startService(new Intent(c, EarshotService.class).setAction(EarshotService.A_STOP));
+        } catch (Exception ignored) { /* already stopped */ }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void status(PluginCall call) {
+        JSObject r = new JSObject();
+        r.put("recording", EarshotService.recording);
+        r.put("startedAt", EarshotService.startedAtMs);
+        call.resolve(r);
+    }
 }

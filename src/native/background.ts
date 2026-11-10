@@ -6,6 +6,9 @@ interface EarshotNative {
   start(): Promise<{ started: boolean; error?: string }>;
   takeRecordings(): Promise<{ files: BgFile[]; recording: boolean }>;
   discard(o: { name: string }): Promise<void>;
+  record(): Promise<{ ok: boolean; error?: string }>;
+  stopRecording(): Promise<void>;
+  status(): Promise<{ recording: boolean; startedAt: number }>;
   addListener(ev: 'state', fn: (s: { recording: boolean }) => void): Promise<{ remove(): void }>;
 }
 
@@ -49,4 +52,15 @@ export function onBackgroundState(fn: (recording: boolean) => void): () => void 
   let handle: { remove(): void } | null = null;
   Native.addListener('state', (s) => fn(s.recording)).then((h) => { handle = h; }).catch(() => undefined);
   return () => handle?.remove();
+}
+
+/** Record through the phone's background service: survives minimizing the app and locking the screen. */
+export async function nativeRecord(): Promise<{ ok: boolean; error?: string }> {
+  if (!isNative) return { ok: false, error: 'not the installed app' };
+  try { return await Native.record(); } catch (e) { return { ok: false, error: String((e as Error)?.message ?? e) }; }
+}
+export async function nativeStop(): Promise<void> { if (isNative) { try { await Native.stopRecording(); } catch { /* ignore */ } } }
+export async function nativeStatus(): Promise<{ recording: boolean; startedAt: number }> {
+  if (!isNative) return { recording: false, startedAt: 0 };
+  try { return await Native.status(); } catch { return { recording: false, startedAt: 0 }; }
 }
