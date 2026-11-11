@@ -46,10 +46,13 @@ export async function decodeWavBlob(blob: Blob): Promise<{ samples: Float32Array
   return { samples: out, sampleRate };
 }
 
+/** Anything whose bytes can be read a slice at a time: a Blob, or a recording file on the phone. */
+export interface ByteSource { size: number; slice(start?: number, end?: number): { arrayBuffer(): Promise<ArrayBuffer> } }
+
 export interface WavInfo { numCh: number; sampleRate: number; bits: number; dataOff: number; frames: number }
 
 /** Reads just the header, so a long recording never has to be loaded whole. */
-export async function wavInfo(blob: Blob): Promise<WavInfo> {
+export async function wavInfo(blob: ByteSource): Promise<WavInfo> {
   const buf = await blob.slice(0, 65536).arrayBuffer();
   const v = new DataView(buf);
   if (buf.byteLength < 44) throw new Error('This file has no audio data.');
@@ -68,7 +71,7 @@ export async function wavInfo(blob: Blob): Promise<WavInfo> {
 }
 
 /** Decodes only frames [from, to) to mono floats. */
-export async function decodeWavRange(blob: Blob, info: WavInfo, from: number, to: number): Promise<Float32Array> {
+export async function decodeWavRange(blob: ByteSource, info: WavInfo, from: number, to: number): Promise<Float32Array> {
   const bps = info.bits / 8, ba = bps * info.numCh;
   const a = Math.max(0, Math.min(info.frames, from)), b = Math.max(a, Math.min(info.frames, to));
   const buf = await blob.slice(info.dataOff + a * ba, info.dataOff + b * ba).arrayBuffer();

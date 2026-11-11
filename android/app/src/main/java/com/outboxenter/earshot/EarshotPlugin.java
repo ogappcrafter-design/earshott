@@ -22,6 +22,11 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
+import java.io.RandomAccessFile;
+import android.os.Environment;
+import android.util.Base64;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -197,5 +202,57 @@ public class EarshotPlugin extends Plugin {
             f.delete();
         }
         call.resolve(r);
+    }
+
+    private File recordingFile(String name) {
+        if (name == null || name.isEmpty() || name.contains("/") || name.contains("\\") || name.contains("..")) return null;
+        File f = new File(new File(getContext().getFilesDir(), "background"), name);
+        return f.exists() ? f : null;
+    }
+
+    /** Reads a small slice of a recording, so the app never has to hold a whole file in memory. */
+    @PluginMethod
+    public void readChunk(PluginCall call) {
+        File f = recordingFile(call.getString("name", ""));
+        if (f == null) { call.reject("missing file"); return; }
+        long offset = Math.max(0, call.getLong("offset", 0L));
+        int length = (int) Math.max(0, Math.min(3_000_000, call.getInt("length", 0)));
+        try (RandomAccessFile raf = new RandomAccessFile(f, "r")) {
+            long size = raf.length();
+            int n = (int) Math.max(0, Math.min(length, size - offset));
+            byte[] buf = new byte[n];
+            if (n > 0) { raf.seek(offset); raf.readFully(buf); }
+            JSObject r = new JSObject();
+            r.put("data", Base64.encodeToString(buf, Base64.NO_WRAP));
+            r.put("size", size);
+            call.resolve(r);
+        } catch (Exception e) {
+            call.reject(String.valueOf(e.getMessage()));
+        }
+    }
+
+    /** Copies a recording (streamed, never loaded whole) to the share cache or to Documents/Earshot. */
+    @PluginMethod
+    public void exportRecording(PluginCall call) {
+        File f = recordingFile(call.getString("name", ""));
+        String fileName = call.getString("fileName", "recording.wav");
+        if (f == null || fileName == null || fileName.contains("/") || fileName.contains("..")) { call.reject("missing file"); return; }
+        boolean docs = "documents".equals(call.getString("target", "cache"));
+        File dir = docs
+            ? new File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS), "Earshot")
+            : getContext().getCacheDir();
+        //noinspection ResultOfMethodCallIgnored
+        dir.mkdirs();
+        File out = new File(dir, fileName);
+        try (InputStream in = new FileInputStream(f); OutputStream os = new FileOutputStream(out)) {
+            byte[] buf = new byte[65536];
+            int n;
+            while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+            JSObject r = new JSObject();
+            r.put("uri", "file://" + out.getAbsolutePath());
+            call.resolve(r);
+        } catch (Exception e) {
+            call.reject(String.valueOf(e.getMessage()));
+        }
     }
 }

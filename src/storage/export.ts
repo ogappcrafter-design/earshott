@@ -65,5 +65,8 @@ export async function shareFile(blob: Blob, fileName: string, title: string) {
   await Share.share({ title, url: res.uri, dialogTitle: title });
 }
 
+/** Share a file that already exists on the phone. */
+export async function shareUri(uri: string, title: string) { if (!Capacitor.isNativePlatform()) return; await Share.share({ title, url: uri, dialogTitle: title }); }
+
 export const audioFileName = (r: RecordingMeta) => `${safeFileName(r.title)}.wav`;
 export const transcriptFileName = (r: RecordingMeta) => `${safeFileName(r.title)} transcript.txt`;

@@ -1,4 +1,5 @@
-import { deleteRecording, getRecording, listRecordings, patchRecording, type Recording } from './db';
+import { listRecordings, patchRecording, type RecordingMeta } from './db';
+import { openAudio, removeRecording, type AudioBytes } from './audioSource';
 import { transcriptToText } from './export';
 import { zipFilesCompressed } from './zip';
 import { wavHeader } from '../audio/wav';
@@ -16,17 +17,17 @@ const changed = () => listeners.forEach((f) => f());
 const safe = (t: string) => t.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '_').slice(0, 60) || 'recording';
 
 /** Split a WAV into playable pieces (each with its own header), then zip each losslessly. */
-export async function buildParts(rec: Recording): Promise<Uint8Array[]> {
-  const wav = new Uint8Array(await rec.audio.arrayBuffer());
-  const pcm = wav.subarray(44);
+export async function buildParts(rec: RecordingMeta & { audio: AudioBytes }): Promise<Uint8Array[]> {
   const bps = rec.bitDepth / 8;
   const per = Math.floor(PART_BYTES / bps) * bps;
-  const pieces = Math.max(1, Math.ceil(pcm.length / per));
+  const pcmLen = Math.max(0, rec.audio.size - 44);
+  const pieces = Math.max(1, Math.ceil(pcmLen / per));
   const base = safe(rec.title);
   const text = new TextEncoder().encode(transcriptToText(rec) || 'No transcript.');
   const out: Uint8Array[] = [];
   for (let i = 0; i < pieces; i++) {
-    const slice = pcm.subarray(i * per, Math.min(pcm.length, (i + 1) * per));
+    // Only this part's audio is read into memory, never the whole recording
+    const slice = new Uint8Array(await rec.audio.slice(44 + i * per, 44 + Math.min(pcmLen, (i + 1) * per)).arrayBuffer());
     const file = new Uint8Array(44 + slice.length);
     file.set(new Uint8Array(wavHeader(slice.length / bps, rec.sampleRate, rec.bitDepth)), 0);
     file.set(slice, 44);
@@ -63,8 +64,9 @@ async function run(cfg: BackupConfig) {
   try {
     while (waiting.size) {
       const id = waiting.values().next().value as string; waiting.delete(id);
-      const rec = await getRecording(id);
-      if (!rec) continue;
+      const opened = await openAudio(id);
+      if (!opened) continue;
+      const rec = { ...opened.meta, audio: opened.bytes };
       try {
         const parts = await buildParts(rec);
         const title = rec.title;
@@ -89,7 +91,7 @@ async function run(cfg: BackupConfig) {
           await patchRecording(id, { backupSent: sent }); changed();
         }
         // Every part confirmed accepted by the mail service: now it's safe to free the space
-        if (cfg.deleteAfterSend) await deleteRecording(id);
+        if (cfg.deleteAfterSend) await removeRecording(id);
         changed();
       } catch (err) {
         const msg = (err as Error).message;

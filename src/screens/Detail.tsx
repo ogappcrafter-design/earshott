@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { deleteRecording, getRecordingAudio, patchRecording } from '../storage/db';
-import { audioFileName, saveToDevice, shareFile, transcriptFileName, transcriptToText } from '../storage/export';
+import { getRecordingAudio, patchRecording } from '../storage/db';
+import { removeRecording } from '../storage/audioSource';
+import { nativeExport, nativeFileUrl } from '../native/background';
+import { audioFileName, shareUri, saveToDevice, shareFile, transcriptFileName, transcriptToText } from '../storage/export';
 import { enqueueTranscription, resetTranscriptionCrashes } from '../transcribe/queue';
 import { useStore } from '../state/store';
 import { Button, Confirm } from '../ui/Controls';
@@ -22,11 +24,15 @@ export function Detail({ id, onBack, toast }: { id: string; onBack: () => void; 
   const [blob, setBlob] = useState<Blob | null>(null);
   useEffect(() => {
     let alive = true; setBlob(null);
+    if (rec?.nativeFile) return;
     getRecordingAudio(id).then((b) => { if (alive) setBlob(b); }).catch(() => undefined);
     return () => { alive = false; };
   }, [id]);
-  const url = useMemo(() => (blob ? URL.createObjectURL(blob) : ''), [blob]);
-  useEffect(() => () => { if (url) URL.revokeObjectURL(url); }, [url]);
+  // Background recordings play straight from their file on the phone: never copied into memory
+  const fileUrl = rec?.nativePath ? nativeFileUrl(rec.nativePath) : '';
+  const blobUrl = useMemo(() => (blob ? URL.createObjectURL(blob) : ''), [blob]);
+  useEffect(() => () => { if (blobUrl) URL.revokeObjectURL(blobUrl); }, [blobUrl]);
+  const url = fileUrl || blobUrl;
   const needAudio = async () => { const b = blob ?? await getRecordingAudio(id); if (!b) throw new Error('This recording\'s audio is missing.'); return b; };
   useEffect(() => { if (rec) setTitle(rec.title); }, [rec?.title]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -77,9 +83,9 @@ export function Detail({ id, onBack, toast }: { id: string; onBack: () => void; 
 
       <div className="action-row">
         <Button variant="ghost" icon={<IconShare />} busy={busy === 'share'}
-          onClick={() => run('share', async () => shareFile(await needAudio(), audioFileName(rec), rec.title))}>Share audio</Button>
+          onClick={() => run('share', async () => rec.nativeFile ? shareUri(await nativeExport(rec.nativeFile, audioFileName(rec), 'cache'), rec.title) : shareFile(await needAudio(), audioFileName(rec), rec.title))}>Share audio</Button>
         <Button variant="ghost" icon={<IconSave />} busy={busy === 'save'}
-          onClick={() => run('save', async () => saveToDevice(await needAudio(), audioFileName(rec)), 'Saved to')}>Save to phone</Button>
+          onClick={() => run('save', async () => rec.nativeFile ? (await nativeExport(rec.nativeFile, audioFileName(rec), 'documents'), 'Documents/Earshot') : saveToDevice(await needAudio(), audioFileName(rec)), 'Saved to')}>Save to phone</Button>
       </div>
 
       <section className="transcript">
@@ -116,7 +122,7 @@ export function Detail({ id, onBack, toast }: { id: string; onBack: () => void; 
       <Button variant="danger" icon={<IconTrash />} onClick={() => setConfirmDel(true)}>Delete recording</Button>
       <Confirm open={confirmDel} title="Delete this recording?" body="The audio and transcript are removed from Earshot. Copies you saved or shared are not affected."
         confirmLabel="Delete recording" danger onCancel={() => setConfirmDel(false)}
-        onConfirm={async () => { await deleteRecording(rec.id); await s.refresh(); toast('Recording deleted'); onBack(); }} />
+        onConfirm={async () => { await removeRecording(rec.id); await s.refresh(); toast('Recording deleted'); onBack(); }} />
     </div>
   );
 }

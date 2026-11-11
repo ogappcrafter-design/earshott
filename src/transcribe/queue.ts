@@ -1,5 +1,6 @@
 import { decodeWavRange, resampleLinear, wavInfo } from './resample';
-import { getRecording, listRecordings, logError, patchRecording, type TranscriptChunk } from '../storage/db';
+import { openAudio } from '../storage/audioSource';
+import { listRecordings, logError, patchRecording, type TranscriptChunk } from '../storage/db';
 import { TRANSCRIBE_MODELS, emit, onTranscribe } from './queue.shared';
 export { TRANSCRIBE_MODELS, onTranscribe };
 
@@ -96,7 +97,8 @@ async function pump() {
   if (!job) return;
   busy = true;
   try {
-    const rec = await getRecording(job.id);
+    const opened = await openAudio(job.id);
+    const rec = opened ? { ...opened.meta, audio: opened.bytes } : null;
     if (!rec) return;
     await patchRecording(job.id, { transcriptStatus: 'working' });
     const info = await wavInfo(rec.audio);

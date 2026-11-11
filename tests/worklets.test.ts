@@ -106,3 +106,23 @@ describe('gate does not chop soft speech', () => {
     expect(minGainDuringSpeech).toBeGreaterThan(0.9);
   });
 });
+
+describe('reading audio in slices', () => {
+  it('wavInfo + decodeWavRange work on any slice-able source, without reading the whole thing', async () => {
+    const { wavInfo, decodeWavRange } = await import('../src/transcribe/resample');
+    const { wavHeader } = await import('../src/audio/wav');
+    const frames = 48000 * 3;
+    const pcm = new Int16Array(frames).map((_, i) => Math.round(Math.sin(i * 0.05) * 8000));
+    const bytes = new Uint8Array(44 + pcm.length * 2);
+    bytes.set(new Uint8Array(wavHeader(frames, 48000, 16)), 0);
+    bytes.set(new Uint8Array(pcm.buffer), 44);
+    let read = 0;
+    const src = { size: bytes.length, slice: (a = 0, b = bytes.length) => ({ arrayBuffer: async () => { read += b - a; return bytes.slice(a, b).buffer as ArrayBuffer; } }) };
+    const info = await wavInfo(src);
+    expect(info.frames).toBe(frames);
+    const part = await decodeWavRange(src, info, 48000, 96000);
+    expect(part.length).toBe(48000);
+    expect(Math.abs(part[10] - pcm[48010] / 32768)).toBeLessThan(1e-4);
+    expect(read).toBeLessThan(bytes.length * 0.7); // header + one second, not the file
+  });
+});

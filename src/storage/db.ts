@@ -21,6 +21,8 @@ export interface Recording {
   transcriptDoneSec?: number;
   /** Email backup progress: parts confirmed sent, out of total. */
   backupSent?: number; backupParts?: number; backupError?: string;
+  /** Background recordings stay as a file on the phone (never copied into memory): its name and full path. */
+  nativeFile?: string; nativePath?: string;
 }
 
 export interface VoiceProfile {
@@ -110,6 +112,17 @@ export async function listRecordings(): Promise<RecordingMeta[]> {
   }
   try { ls?.removeItem('earshot.readingRow'); if (!sawAudio) ls?.setItem('earshot.audioSplit', '1'); } catch { /* ignore */ }
   return out.sort((x, y) => y.createdAt - x.createdAt);
+}
+
+/** Adds a recording whose audio lives in a file on the phone: only the details are stored here. */
+export async function saveRecordingMeta(meta: RecordingMeta) {
+  await (await db()).put('recordings', meta as unknown as Recording);
+}
+export async function getRecordingMeta(id: string): Promise<RecordingMeta | undefined> {
+  const row = await (await db()).get('recordings', id) as (Recording & { audio?: unknown }) | undefined;
+  if (!row) return undefined;
+  const { audio: _a, ...meta } = row; void _a;
+  return meta;
 }
 
 /** Loads one recording's audio only when it's actually needed (play, share, send, transcribe). */
