@@ -20,7 +20,14 @@ function crumb(): Record<string, unknown> {
   return { at: Date.now(), visible: !document.hidden, heapMB: m ? Math.round(m.usedJSHeapSize / 1048576) : null,
     heapLimitMB: m ? Math.round(m.jsHeapSizeLimit / 1048576) : null, ...extra };
 }
-const writeCrumb = () => set(CRUMB, JSON.stringify(crumb()));
+let uaMemMB: number | null = null;
+const writeCrumb = () => set(CRUMB, JSON.stringify({ ...crumb(), pageMemMB: uaMemMB }));
+/** Whole-page memory (all workers and audio), where the browser allows measuring it. */
+async function sampleMemory() {
+  const f = (performance as unknown as { measureUserAgentSpecificMemory?: () => Promise<{ bytes: number }> }).measureUserAgentSpecificMemory;
+  if (!f || !(globalThis as { crossOriginIsolated?: boolean }).crossOriginIsolated) return;
+  try { uaMemMB = Math.round((await f.call(performance)).bytes / 1048576); } catch { /* not allowed here */ }
+}
 
 async function post(body: string) {
   try {
@@ -65,5 +72,5 @@ export function startCrashWatch() {
   window.addEventListener('pagehide', () => { writeCrumb(); set(SESS, 'closed'); });
   document.addEventListener('visibilitychange', () => { writeCrumb(); set(SESS, document.hidden ? 'hidden' : 'open'); });
   window.addEventListener('error', (e) => { writeCrumb(); sendReport('js-error: ' + String(e.message).slice(0, 200), get(CRUMB)); });
-  writeCrumb(); setInterval(writeCrumb, 4000);
+  writeCrumb(); setInterval(writeCrumb, 4000); void sampleMemory(); setInterval(() => void sampleMemory(), 15000);
 }

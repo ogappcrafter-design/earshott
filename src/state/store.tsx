@@ -159,7 +159,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     };
     // Mirror the service's recording state (it may have been started from the notification, or before the app was reopened)
-    const sync=async()=>{ const st=await nativeStatus(); setNativeRec(st.recording?st.startedAt||Date.now():null); };
+    const sync=async()=>{
+      const st=await nativeStatus();
+      if(st.recording && engineRef.current.running){ await engineRef.current.stop(); setLive(false); setMonitoring(false); }
+      setNativeRec(st.recording?st.startedAt||Date.now():null);
+    };
     startBackground(); pull(); sync();
     const offState=onBackgroundState((rec)=>{ if(rec) sync(); else { setNativeRec(null); pull(); } });
     const appH=CapApp.addListener('appStateChange',(st)=>{ if(st.isActive){ startBackground(); pull(); sync(); } });
@@ -183,6 +187,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const startLive = useCallback(async()=>{
     setError(null);
+    // Only one part of the app may hold the mic: on this phone, two at once ran the memory out within a minute
+    if(nativeRecRef.current!==null){ setError('Live listening is off while recording in the background. Stop the recording to listen.'); return false; }
     try{await engine.start(effectiveEngine,{demo:usingTestSignal});setLive(true);return true;}
     catch(e){
       if(IS_TESTER){
@@ -226,6 +232,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     logError('rec:start',`running=${engine.running} native=${isNative}`);
     if(isNative){
       // Installed app: the background service records, so minimizing or locking the phone never stops it
+      if(engine.running){ await engine.stop(); setLive(false); setMonitoring(false); setGhostAvailSec(0); } // hand the mic to the recorder
       const r=await nativeRecord();
       if(r.ok){ setNativeRec(Date.now()); setBookmarks([]); logError('rec:started','native service'); return; }
       logError('rec:start',`native failed: ${r.error ?? ''}; recording in-app instead`);
