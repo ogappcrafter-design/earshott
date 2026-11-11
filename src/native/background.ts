@@ -9,6 +9,7 @@ interface EarshotNative {
   record(): Promise<{ ok: boolean; error?: string }>;
   stopRecording(): Promise<void>;
   status(): Promise<{ recording: boolean; startedAt: number }>;
+  lastExit(): Promise<{ exits: { at: number; reason: number; description: string; importance: number; pssKB: number; rssKB: number }[]; javaCrash?: string }>;
   addListener(ev: 'state', fn: (s: { recording: boolean }) => void): Promise<{ remove(): void }>;
 }
 
@@ -63,4 +64,10 @@ export async function nativeStop(): Promise<void> { if (isNative) { try { await 
 export async function nativeStatus(): Promise<{ recording: boolean; startedAt: number }> {
   if (!isNative) return { recording: false, startedAt: 0 };
   try { return await Native.status(); } catch { return { recording: false, startedAt: 0 }; }
+}
+
+/** Android's own record of why the app was closed recently. */
+export async function nativeLastExit() {
+  if (!isNative) return null;
+  try { return await Native.lastExit(); } catch { return null; }
 }

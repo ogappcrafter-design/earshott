@@ -383,7 +383,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const crumbRef = useRef<Record<string, unknown>>({});
   const tStatus = useRef<string>('idle');
   useEffect(()=>onTranscribe((e)=>{ tStatus.current = e.type==='status' ? `${e.status} ${e.progress ?? ''}%` : e.type==='download' ? `download ${Math.round(e.progress)}%` : e.type; }),[]);
-  crumbRef.current = { live, recording, capturedSec: Math.round(capturedSec), stalled: audioStalled, monitoring,
+  crumbRef.current = { live, recording, nativeRec: nativeRec!==null, capturedSec: Math.round(capturedSec), stalled: audioStalled, monitoring,
     legacyAudio: engine.legacy, ctx: engine.contextState, recordings: recordings.length, model: settings.transcribeModel, transcribe: tStatus.current,
     silent: settings.silentMode, volumeDb: settings.engine?.volumeDb };
   useEffect(()=>{ setCrumbSource(()=>({ ...crumbRef.current, transcribe: tStatus.current })); },[]);

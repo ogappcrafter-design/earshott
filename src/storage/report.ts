@@ -1,4 +1,5 @@
 import { readErrorLog } from './db';
+import { nativeLastExit } from '../native/background';
 
 /** Automatic crash reporting: if the app dies while open, the next launch sends its black-box log to the developer. */
 const REPORT_URL = 'https://earshott.vercel.app/api/report';
@@ -30,8 +31,8 @@ async function post(body: string) {
 }
 
 let sentThisSession = 0;
-export function sendReport(reason: string, lastCrumb?: string | null) {
-  if (sentThisSession >= 3) return;
+export function sendReport(reason: string, lastCrumb?: string | null, extra?: unknown) {
+  if (sentThisSession >= 4) return;
   sentThisSession++;
   const nav = navigator as Navigator & { deviceMemory?: number };
   const cap = (globalThis as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
@@ -39,7 +40,7 @@ export function sendReport(reason: string, lastCrumb?: string | null) {
   const body = JSON.stringify({
     reason, build: typeof __BUILD__ === 'string' ? __BUILD__ : 'dev', at: new Date().toISOString(),
     native: !!cap?.isNativePlatform?.(), ua: navigator.userAgent, deviceMemoryGB: nav.deviceMemory ?? null,
-    cores: navigator.hardwareConcurrency ?? null, lastState: parsedCrumb, log: readErrorLog(),
+    cores: navigator.hardwareConcurrency ?? null, lastState: parsedCrumb, android: extra ?? null, log: readErrorLog(),
   }).slice(0, 38_000);
   void post(body);
 }
@@ -50,6 +51,16 @@ export function startCrashWatch() {
   const prev = get(SESS), last = get(CRUMB);
   // "open" means the app was on screen and never got the chance to say goodbye: that's a crash
   if (prev === 'open') sendReport('closed-while-open', last);
+  // Installed app: Android says exactly why it closed us (crash / out of memory / killed). Report anything new.
+  void nativeLastExit().then((info) => {
+    if (!info) return;
+    const seen = Number(get('earshot.exitSeen') ?? 0);
+    const fresh = info.exits.filter((e) => e.at > seen);
+    if (info.exits.length) set('earshot.exitSeen', String(Math.max(...info.exits.map((e) => e.at))));
+    // reason 1 = exit itself, 10 = user request: normal. Anything else (crash, ANR, low memory, killed) is worth knowing.
+    const bad = fresh.filter((e) => e.reason !== 1 && e.reason !== 10);
+    if (bad.length || info.javaCrash) sendReport('android-exit', last, { exits: bad, javaCrash: info.javaCrash ?? null });
+  });
   set(SESS, 'open');
   window.addEventListener('pagehide', () => { writeCrumb(); set(SESS, 'closed'); });
   document.addEventListener('visibilitychange', () => { writeCrumb(); set(SESS, document.hidden ? 'hidden' : 'open'); });
